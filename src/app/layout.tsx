@@ -1,5 +1,15 @@
 import type { Metadata } from 'next';
-import { Noto_Sans_KR, Noto_Serif_KR } from 'next/font/google';
+import {
+  Noto_Sans_KR,
+  Noto_Serif_KR,
+  Nanum_Myeongjo,
+  Nanum_Gothic,
+  Gowun_Batang,
+  Gowun_Dodum,
+  IBM_Plex_Sans_KR,
+  Hahmlet,
+  Nanum_Pen_Script,
+} from 'next/font/google';
 import './globals.css';
 
 const notoSans = Noto_Sans_KR({
@@ -14,6 +24,48 @@ const notoSerif = Noto_Serif_KR({
   variable: '--font-serif',
 });
 
+const nanumMyeongjo = Nanum_Myeongjo({
+  subsets: ['latin'],
+  weight: ['400', '700'],
+  variable: '--font-nanum-myeongjo',
+});
+
+const nanumGothic = Nanum_Gothic({
+  subsets: ['latin'],
+  weight: ['400', '700'],
+  variable: '--font-nanum-gothic',
+});
+
+const gowunBatang = Gowun_Batang({
+  subsets: ['latin'],
+  weight: ['400', '700'],
+  variable: '--font-gowun-batang',
+});
+
+const gowunDodum = Gowun_Dodum({
+  subsets: ['latin'],
+  weight: ['400'],
+  variable: '--font-gowun-dodum',
+});
+
+const ibmPlexSansKr = IBM_Plex_Sans_KR({
+  subsets: ['latin'],
+  weight: ['400', '500', '700'],
+  variable: '--font-ibm-plex',
+});
+
+const hahmlet = Hahmlet({
+  subsets: ['latin'],
+  weight: ['400', '600', '700'],
+  variable: '--font-hahmlet',
+});
+
+const nanumPen = Nanum_Pen_Script({
+  subsets: ['latin'],
+  weight: ['400'],
+  variable: '--font-nanum-pen',
+});
+
 export const metadata: Metadata = {
   title: 'NovelForge — AI 소설 창작 스튜디오',
   description:
@@ -26,7 +78,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className={`${notoSans.variable} ${notoSerif.variable}`}>
+    <html
+      lang="ko"
+      className={`${notoSans.variable} ${notoSerif.variable} ${nanumMyeongjo.variable} ${nanumGothic.variable} ${gowunBatang.variable} ${gowunDodum.variable} ${ibmPlexSansKr.variable} ${hahmlet.variable} ${nanumPen.variable}`}
+    >
       <body className="min-h-screen bg-stone-50 text-stone-900 antialiased font-sans">
         {children}
       </body>
