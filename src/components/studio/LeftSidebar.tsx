@@ -11,6 +11,8 @@ import {
   Trash2,
   Sparkles,
   CheckCircle2,
+  Search,
+  X,
 } from 'lucide-react';
 import type {
   Chapter,
@@ -40,6 +42,7 @@ interface LeftSidebarProps {
   onDeletePlot: (id: string) => Promise<void>;
   extraGroups: { characters: string[]; world: string[]; plot: string[] };
   onAddGroup: (kind: 'characters' | 'world' | 'plot', name: string) => void;
+  onNavigateBibleItem: (kind: 'characters' | 'world' | 'plot', id: string) => void;
   images: ProjectImage[];
   onSetCoverImage: (imageUrl: string) => Promise<void>;
   onRequestImageGeneration: (targetType: ImageTargetType, targetId?: string) => void;
@@ -62,11 +65,13 @@ export default function LeftSidebar({
   onDeletePlot,
   extraGroups,
   onAddGroup,
+  onNavigateBibleItem,
   images,
   onSetCoverImage,
   onRequestImageGeneration,
 }: LeftSidebarProps) {
   const [tab, setTab] = useState<LeftTab>('chapters');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Character form
   const [editingChar, setEditingChar] = useState<Partial<Character> | null>(null);
@@ -122,8 +127,100 @@ export default function LeftSidebar({
     { id: 'gallery', label: '갤러리', icon: ImageIcon },
   ];
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const searchResults = normalizedQuery
+    ? [
+        ...chapters
+          .filter(
+            (c) =>
+              c.title.toLowerCase().includes(normalizedQuery) ||
+              c.content.toLowerCase().includes(normalizedQuery) ||
+              c.summary.toLowerCase().includes(normalizedQuery)
+          )
+          .map((c) => ({
+            kind: 'chapter' as const,
+            id: c.id,
+            badge: '회차',
+            title: c.title,
+            subtitle: c.summary || c.content.slice(0, 60) || '본문 없음',
+          })),
+        ...characters
+          .filter(
+            (c) =>
+              c.name.toLowerCase().includes(normalizedQuery) ||
+              c.role.toLowerCase().includes(normalizedQuery) ||
+              c.personality.toLowerCase().includes(normalizedQuery) ||
+              (c.free_notes ?? '').toLowerCase().includes(normalizedQuery) ||
+              (c.tags ?? []).some((t) =>
+                t.toLowerCase().includes(normalizedQuery)
+              )
+          )
+          .map((c) => ({
+            kind: 'characters' as const,
+            id: c.id,
+            badge: '인물',
+            title: c.name,
+            subtitle:
+              (c.tags ?? []).length > 0
+                ? `${c.role} · ${(c.tags ?? []).map((t) => `#${t}`).join(' ')}`
+                : c.role,
+          })),
+        ...worldSettings
+          .filter(
+            (w) =>
+              w.title.toLowerCase().includes(normalizedQuery) ||
+              w.description.toLowerCase().includes(normalizedQuery) ||
+              w.category.toLowerCase().includes(normalizedQuery)
+          )
+          .map((w) => ({
+            kind: 'world' as const,
+            id: w.id,
+            badge: '세계관',
+            title: w.title,
+            subtitle: `[${w.category}] ${w.description.slice(0, 50)}`,
+          })),
+        ...plotNodes
+          .filter(
+            (p) =>
+              p.title.toLowerCase().includes(normalizedQuery) ||
+              p.description.toLowerCase().includes(normalizedQuery)
+          )
+          .map((p) => ({
+            kind: 'plot' as const,
+            id: p.id,
+            badge: '줄거리',
+            title: p.title,
+            subtitle: `[${p.act_label}] ${p.description.slice(0, 50)}`,
+          })),
+      ]
+    : [];
+
   return (
     <aside className="flex h-full flex-col border-r border-stone-200 bg-white">
+      {/* Global Sidebar Search */}
+      <div className="border-b border-stone-200 p-2.5">
+        <div className="relative flex items-center">
+          <Search className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-stone-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="인물, 회차, 세계관, 줄거리, #태그 검색..."
+            className="w-full rounded-lg border border-stone-200 bg-stone-50 py-1.5 pr-7 pl-8 text-xs text-stone-800 placeholder-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 rounded p-0.5 text-stone-400 hover:text-stone-700"
+              title="검색 지우기"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Tab Navigation */}
       <div className="grid grid-cols-5 border-b border-stone-200 bg-stone-50/70 p-1">
         {tabs.map((item) => {
@@ -147,9 +244,51 @@ export default function LeftSidebar({
         })}
       </div>
 
-      {/* Tab Content */}
+      {/* Tab Content or Search Results */}
       <div className="flex-1 overflow-y-auto p-3">
-        {tab === 'chapters' && (
+        {normalizedQuery ? (
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold text-stone-500">
+              검색 결과 ({searchResults.length}건)
+            </p>
+            {searchResults.length === 0 ? (
+              <p className="py-10 text-center text-xs text-stone-400">
+                &ldquo;{searchQuery}&rdquo;에 해당하는 항목이 없습니다.
+              </p>
+            ) : (
+              searchResults.map((item) => (
+                <button
+                  key={`${item.kind}-${item.id}`}
+                  type="button"
+                  onClick={() => {
+                    if (item.kind === 'chapter') {
+                      onSelectChapter(item.id);
+                    } else {
+                      onNavigateBibleItem(item.kind, item.id);
+                    }
+                  }}
+                  className="block w-full rounded-xl border border-stone-200 bg-white p-2.5 text-left transition hover:border-amber-400 hover:bg-amber-50/40"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="rounded bg-stone-900 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      {item.badge}
+                    </span>
+                    <span className="truncate text-xs font-bold text-stone-900">
+                      {item.title}
+                    </span>
+                  </div>
+                  {item.subtitle && (
+                    <p className="mt-1 line-clamp-1 text-[11px] text-stone-500">
+                      {item.subtitle}
+                    </p>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        ) : null}
+
+        {!normalizedQuery && tab === 'chapters' && (
           <div className="space-y-2">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-xs font-semibold text-stone-500">
@@ -203,7 +342,7 @@ export default function LeftSidebar({
           </div>
         )}
 
-        {tab === 'characters' && (
+        {!normalizedQuery && tab === 'characters' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-1.5">
               <div className="flex items-center gap-1">
@@ -442,7 +581,7 @@ export default function LeftSidebar({
           </div>
         )}
 
-        {tab === 'world' && (
+        {!normalizedQuery && tab === 'world' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-1.5">
               <div className="flex items-center gap-1">
@@ -636,7 +775,7 @@ export default function LeftSidebar({
           </div>
         )}
 
-        {tab === 'plot' && (
+        {!normalizedQuery && tab === 'plot' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-1.5">
               <div className="flex items-center gap-1">
@@ -812,7 +951,7 @@ export default function LeftSidebar({
           </div>
         )}
 
-        {tab === 'gallery' && (
+        {!normalizedQuery && tab === 'gallery' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-stone-500">

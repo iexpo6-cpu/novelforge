@@ -73,6 +73,11 @@ export default function StudioShell({
     world: string[];
     plot: string[];
   }>({ characters: [], world: [], plot: [] });
+  const [focusedItem, setFocusedItem] = useState<{
+    kind: BibleWorkspaceMode;
+    id: string;
+    nonce: number;
+  } | null>(null);
 
   function handleAddGroup(
     kind: 'characters' | 'world' | 'plot',
@@ -192,6 +197,10 @@ export default function StudioShell({
     const custom_fields = (char.custom_fields ?? []).filter(
       (f) => f.label.trim() || f.value.trim()
     );
+    const tags = (char.tags ?? []).map((t) => t.trim()).filter(Boolean);
+    const linked_relationships = (char.linked_relationships ?? []).filter(
+      (r) => r.targetCharacterId && r.relationType.trim()
+    );
     if (char.id) {
       const { data } = await supabase
         .from('characters')
@@ -204,6 +213,9 @@ export default function StudioShell({
           personality: char.personality,
           background: char.background,
           relationships: char.relationships,
+          free_notes: char.free_notes ?? '',
+          tags,
+          linked_relationships,
           custom_fields,
           avatar_image_url: char.avatar_image_url ?? null,
         })
@@ -228,6 +240,9 @@ export default function StudioShell({
           personality: char.personality || '',
           background: char.background || '',
           relationships: char.relationships || '',
+          free_notes: char.free_notes ?? '',
+          tags,
+          linked_relationships,
           custom_fields,
           avatar_image_url: char.avatar_image_url ?? null,
         })
@@ -557,6 +572,11 @@ export default function StudioShell({
             onDeletePlot={handleDeletePlot}
             extraGroups={extraGroups}
             onAddGroup={handleAddGroup}
+            onNavigateBibleItem={(kind, id) => {
+              setCenterMode(kind);
+              setFocusedItem({ kind, id, nonce: Date.now() });
+              setMobilePane('editor');
+            }}
             images={images}
             onSetCoverImage={handleSetCoverImage}
             onRequestImageGeneration={(targetType, targetId) => {
@@ -609,6 +629,7 @@ export default function StudioShell({
               onDeletePlot={handleDeletePlot}
               extraGroups={extraGroups}
               onAddGroup={handleAddGroup}
+              focusedItem={focusedItem}
               onRequestImageGeneration={(targetType, targetId) => {
                 setImageTargetType(targetType);
                 setImageTargetId(targetId ?? '');

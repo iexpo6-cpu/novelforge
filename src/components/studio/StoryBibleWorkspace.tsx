@@ -15,6 +15,9 @@ import {
   Tag,
   Upload,
   X,
+  Hash,
+  Network,
+  ArrowRight,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { buildAIHeaders } from '@/lib/ai/client-key';
@@ -22,6 +25,7 @@ import type {
   Chapter,
   Character,
   CharacterCustomField,
+  CharacterRelationLink,
   ImageTargetType,
   PlotNode,
   Project,
@@ -39,6 +43,11 @@ interface StoryBibleWorkspaceProps {
   plotNodes: PlotNode[];
   extraGroups: { characters: string[]; world: string[]; plot: string[] };
   onAddGroup: (kind: 'characters' | 'world' | 'plot', name: string) => void;
+  focusedItem?: {
+    kind: BibleWorkspaceMode;
+    id: string;
+    nonce: number;
+  } | null;
   onSaveProjectMeta: (
     patch: Pick<Project, 'logline' | 'synopsis'>
   ) => Promise<void>;
@@ -70,6 +79,17 @@ const SUGGESTED_CHAR_TRAITS = [
   '특기/능력',
   '목표/동기',
   '비밀/약점',
+];
+
+const RELATION_PRESETS = [
+  '동료',
+  '라이벌',
+  '적대',
+  '스승/제자',
+  '가족',
+  '연인',
+  '주종',
+  '계약',
 ];
 
 function extractGroups<T extends { folder?: string }>(
@@ -175,6 +195,205 @@ function GroupDropdownField({
   );
 }
 
+function CharacterRelationshipGraph({
+  characters,
+  onSelectCharacter,
+}: {
+  characters: Character[];
+  onSelectCharacter: (char: Character) => void;
+}) {
+  if (characters.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-stone-300 bg-white py-16 text-center text-xs text-stone-400">
+        등록된 등장인물이 없습니다. 인물을 추가하고 관계를 연결해보세요.
+      </div>
+    );
+  }
+
+  const width = 720;
+  const height = 440;
+  const cx = width / 2;
+  const cy = height / 2;
+  const radius = Math.min(cx, cy) - 75;
+
+  const positions = new Map<string, { x: number; y: number }>();
+  characters.forEach((c, idx) => {
+    if (characters.length === 1) {
+      positions.set(c.id, { x: cx, y: cy });
+    } else {
+      const angle = (2 * Math.PI * idx) / characters.length - Math.PI / 2;
+      positions.set(c.id, {
+        x: cx + radius * Math.cos(angle),
+        y: cy + radius * Math.sin(angle),
+      });
+    }
+  });
+
+  const edges: Array<{
+    from: Character;
+    to: Character;
+    relationType: string;
+    description: string;
+    key: string;
+  }> = [];
+
+  characters.forEach((c) => {
+    (c.linked_relationships ?? []).forEach((rel, idx) => {
+      const target = characters.find((t) => t.id === rel.targetCharacterId);
+      if (target) {
+        edges.push({
+          from: c,
+          to: target,
+          relationType: rel.relationType,
+          description: rel.description,
+          key: `${c.id}-${target.id}-${idx}`,
+        });
+      }
+    });
+  });
+
+  return (
+    <div className="space-y-4 rounded-2xl border border-stone-200 bg-white p-5 shadow-xs">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-bold text-stone-900">
+            인물 관계도 ({characters.length}명 · {edges.length}개 연결)
+          </h3>
+          <p className="text-[11px] text-stone-500">
+            인물 노드를 클릭하면 해당 캐릭터 상세 편집 화면으로 이동합니다.
+          </p>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-stone-100 bg-stone-50/70">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="mx-auto h-[420px] w-full max-w-[720px]"
+        >
+          <defs>
+            <marker
+              id="rel-arrow"
+              viewBox="0 0 10 10"
+              refX="24"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#d97706" />
+            </marker>
+          </defs>
+
+          {edges.map((edge) => {
+            const p1 = positions.get(edge.from.id);
+            const p2 = positions.get(edge.to.id);
+            if (!p1 || !p2) return null;
+            const mx = (p1.x + p2.x) / 2;
+            const my = (p1.y + p2.y) / 2;
+            return (
+              <g key={edge.key}>
+                <line
+                  x1={p1.x}
+                  y1={p1.y}
+                  x2={p2.x}
+                  y2={p2.y}
+                  stroke="#f59e0b"
+                  strokeWidth="2"
+                  strokeOpacity="0.65"
+                  markerEnd="url(#rel-arrow)"
+                />
+                <rect
+                  x={mx - 28}
+                  y={my - 10}
+                  width="56"
+                  height="20"
+                  rx="6"
+                  fill="#ffffff"
+                  stroke="#fcd34d"
+                />
+                <text
+                  x={mx}
+                  y={my + 4}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fontWeight="600"
+                  fill="#92400e"
+                >
+                  {edge.relationType.slice(0, 8)}
+                </text>
+              </g>
+            );
+          })}
+
+          {characters.map((c) => {
+            const pos = positions.get(c.id);
+            if (!pos) return null;
+            return (
+              <g
+                key={c.id}
+                transform={`translate(${pos.x}, ${pos.y})`}
+                onClick={() => onSelectCharacter(c)}
+                className="cursor-pointer"
+              >
+                <circle
+                  r="28"
+                  fill="#ffffff"
+                  stroke="#1c1917"
+                  strokeWidth="2"
+                />
+                <text
+                  y="4"
+                  textAnchor="middle"
+                  fontSize="11"
+                  fontWeight="700"
+                  fill="#1c1917"
+                >
+                  {c.name.slice(0, 4)}
+                </text>
+                <text
+                  y="42"
+                  textAnchor="middle"
+                  fontSize="10"
+                  fill="#78716c"
+                >
+                  {c.role}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {edges.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {edges.map((edge) => (
+            <div
+              key={edge.key}
+              className="flex items-center justify-between rounded-xl border border-stone-200 bg-stone-50/50 px-3 py-2 text-xs"
+            >
+              <div className="flex items-center gap-1.5 font-semibold text-stone-800">
+                <span>{edge.from.name}</span>
+                <ArrowRight className="h-3.5 w-3.5 text-amber-600" />
+                <span>{edge.to.name}</span>
+              </div>
+              <div className="text-right">
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                  {edge.relationType}
+                </span>
+                {edge.description && (
+                  <p className="mt-0.5 text-[11px] text-stone-500">
+                    {edge.description}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StoryBibleWorkspace({
   mode,
   project,
@@ -184,6 +403,7 @@ export default function StoryBibleWorkspace({
   plotNodes,
   extraGroups,
   onAddGroup,
+  focusedItem,
   onSaveProjectMeta,
   onSaveCharacter,
   onDeleteCharacter,
@@ -200,6 +420,11 @@ export default function StoryBibleWorkspace({
 
   // Filter dropdown states
   const [charGroupFilter, setCharGroupFilter] = useState<string>('전체');
+  const [charTagFilter, setCharTagFilter] = useState<string>('전체');
+  const [charViewMode, setCharViewMode] = useState<'edit' | 'graph'>('edit');
+  const [charWriteMode, setCharWriteMode] = useState<
+    'structured' | 'free' | 'both'
+  >('both');
   const [worldGroupFilter, setWorldGroupFilter] = useState<string>('전체');
   const [plotGroupFilter, setPlotGroupFilter] = useState<string>('전체');
 
@@ -217,9 +442,16 @@ export default function StoryBibleWorkspace({
     personality: '',
     background: '',
     relationships: '',
+    free_notes: '',
+    tags: [],
+    linked_relationships: [],
     custom_fields: [],
     avatar_image_url: null,
   });
+  const [tagInput, setTagInput] = useState('');
+  const [relTargetId, setRelTargetId] = useState('');
+  const [relType, setRelType] = useState('동료');
+  const [relDesc, setRelDesc] = useState('');
   const [savingChar, setSavingChar] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -247,6 +479,30 @@ export default function StoryBibleWorkspace({
     chapter_id: null,
   });
   const [savingPlot, setSavingPlot] = useState(false);
+
+  // Synchronize focused item from sidebar search without useEffect
+  const [lastFocusedNonce, setLastFocusedNonce] = useState<number | null>(null);
+  if (focusedItem && focusedItem.nonce !== lastFocusedNonce) {
+    setLastFocusedNonce(focusedItem.nonce);
+    if (focusedItem.kind === 'characters') {
+      const target = characters.find((c) => c.id === focusedItem.id);
+      if (target) {
+        setCharDraft({
+          ...target,
+          tags: target.tags ?? [],
+          linked_relationships: target.linked_relationships ?? [],
+          custom_fields: target.custom_fields ?? [],
+        });
+        setCharViewMode('edit');
+      }
+    } else if (focusedItem.kind === 'world') {
+      const target = worldSettings.find((w) => w.id === focusedItem.id);
+      if (target) setWorldDraft(target);
+    } else if (focusedItem.kind === 'plot') {
+      const target = plotNodes.find((p) => p.id === focusedItem.id);
+      if (target) setPlotDraft(target);
+    }
+  }
 
   function flashSaved() {
     setSavedNotice(true);
@@ -320,6 +576,50 @@ export default function StoryBibleWorkspace({
     setCharDraft({ ...charDraft, custom_fields: current });
   }
 
+  function handleAddTag() {
+    const cleaned = tagInput.trim().replace(/^#/, '');
+    if (!cleaned) return;
+    const current = charDraft.tags ?? [];
+    if (!current.includes(cleaned)) {
+      setCharDraft({ ...charDraft, tags: [...current, cleaned] });
+    }
+    setTagInput('');
+  }
+
+  function handleRemoveTag(tag: string) {
+    setCharDraft({
+      ...charDraft,
+      tags: (charDraft.tags ?? []).filter((t) => t !== tag),
+    });
+  }
+
+  function handleAddRelationLink() {
+    if (!relTargetId || !relType.trim()) return;
+    const nextLink: CharacterRelationLink = {
+      targetCharacterId: relTargetId,
+      relationType: relType.trim(),
+      description: relDesc.trim(),
+    };
+    setCharDraft({
+      ...charDraft,
+      linked_relationships: [
+        ...(charDraft.linked_relationships ?? []),
+        nextLink,
+      ],
+    });
+    setRelTargetId('');
+    setRelDesc('');
+  }
+
+  function handleRemoveRelationLink(index: number) {
+    setCharDraft({
+      ...charDraft,
+      linked_relationships: (charDraft.linked_relationships ?? []).filter(
+        (_, i) => i !== index
+      ),
+    });
+  }
+
   async function handleAIGenerate() {
     if (!aiPrompt.trim() || generatingAI) return;
     setGeneratingAI(true);
@@ -356,6 +656,9 @@ export default function StoryBibleWorkspace({
           folder:
             charGroupFilter !== '전체' ? charGroupFilter : prev.folder || '미분류',
           ...data.item,
+          tags: Array.isArray(data.item?.tags)
+            ? data.item.tags
+            : prev.tags ?? [],
           custom_fields: Array.isArray(data.item?.custom_fields)
             ? data.item.custom_fields
             : prev.custom_fields ?? [],
@@ -387,11 +690,26 @@ export default function StoryBibleWorkspace({
     }
   }
 
+  // Collect character tags with counts
+  const tagCounts = new Map<string, number>();
+  characters.forEach((c) => {
+    (c.tags ?? []).forEach((t) => {
+      tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+    });
+  });
+  const allCharTags = Array.from(tagCounts.entries()).sort((a, b) =>
+    a[0].localeCompare(b[0], 'ko')
+  );
+
   const charGroups = extractGroups(characters, extraGroups.characters);
-  const filteredCharacters =
-    charGroupFilter === '전체'
-      ? characters
-      : characters.filter((c) => (c.folder || '미분류') === charGroupFilter);
+  const filteredCharacters = characters.filter((c) => {
+    const matchGroup =
+      charGroupFilter === '전체' ||
+      (c.folder || '미분류') === charGroupFilter;
+    const matchTag =
+      charTagFilter === '전체' || (c.tags ?? []).includes(charTagFilter);
+    return matchGroup && matchTag;
+  });
   const groupedCharacters = groupItemsByCategory(filteredCharacters);
 
   const worldGroups = extractGroups(worldSettings, extraGroups.world);
@@ -451,7 +769,7 @@ export default function StoryBibleWorkspace({
                 </h2>
                 <p className="text-xs text-stone-500">
                   {mode === 'characters' &&
-                    '분류별로 인물을 정리하고, 성격·가치관·말투 등 커스텀 항목과 인물 이미지를 자유롭게 추가하세요.'}
+                    '양식 서술과 자유 서술, #태그 모아보기, 인물 간 관계도 연결까지 자유롭게 구성하세요.'}
                   {mode === 'world' &&
                     '분류별로 세계관을 묶고, 상세 설정과 컨셉아트를 관리하세요.'}
                   {mode === 'plot' &&
@@ -504,33 +822,63 @@ export default function StoryBibleWorkspace({
           {aiError && <p className="mt-2 text-xs text-red-600">{aiError}</p>}
         </div>
 
-        {/* Common Classification Dropdown Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white px-4 py-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="flex items-center gap-1 text-xs font-semibold text-stone-600">
-              <Tag className="h-3.5 w-3.5 text-amber-600" />
-              분류 필터:
-            </span>
-            <select
-              value={activeGroupFilter}
-              onChange={(e) => setActiveGroupFilter(e.target.value)}
-              className="rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-800 focus:border-amber-500 focus:outline-none"
-            >
-              <option value="전체">전체 분류 보기</option>
-              {activeGroups.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => setShowFilterAdd((v) => !v)}
-              className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              분류 추가
-            </button>
+        {/* Common Classification Dropdown Bar + Character Mode Switcher */}
+        <div className="space-y-2.5 rounded-xl border border-stone-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1 text-xs font-semibold text-stone-600">
+                <Tag className="h-3.5 w-3.5 text-amber-600" />
+                분류:
+              </span>
+              <select
+                value={activeGroupFilter}
+                onChange={(e) => setActiveGroupFilter(e.target.value)}
+                className="rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-800 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="전체">전체 분류 보기</option>
+                {activeGroups.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setShowFilterAdd((v) => !v)}
+                className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                분류 추가
+              </button>
+            </div>
+
+            {mode === 'characters' && (
+              <div className="flex items-center gap-1 rounded-lg bg-stone-100 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setCharViewMode('edit')}
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
+                    charViewMode === 'edit'
+                      ? 'bg-white text-stone-900 shadow-xs'
+                      : 'text-stone-500'
+                  }`}
+                >
+                  인물 편집
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCharViewMode('graph')}
+                  className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold ${
+                    charViewMode === 'graph'
+                      ? 'bg-white text-amber-700 shadow-xs'
+                      : 'text-stone-500'
+                  }`}
+                >
+                  <Network className="h-3.5 w-3.5" />
+                  인물 관계도 보기
+                </button>
+              </div>
+            )}
           </div>
 
           {showFilterAdd && (
@@ -562,10 +910,62 @@ export default function StoryBibleWorkspace({
               </button>
             </form>
           )}
+
+          {/* Character Tags Collection Bar */}
+          {mode === 'characters' && allCharTags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-stone-100 pt-2.5">
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-stone-500">
+                <Hash className="h-3 w-3 text-amber-600" />
+                태그 모아보기:
+              </span>
+              <button
+                type="button"
+                onClick={() => setCharTagFilter('전체')}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${
+                  charTagFilter === '전체'
+                    ? 'bg-stone-900 text-white'
+                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                }`}
+              >
+                전체
+              </button>
+              {allCharTags.map(([tag, count]) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() =>
+                    setCharTagFilter(charTagFilter === tag ? '전체' : tag)
+                  }
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${
+                    charTagFilter === tag
+                      ? 'bg-amber-500 text-stone-950'
+                      : 'bg-amber-50 text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100'
+                  }`}
+                >
+                  #{tag} ({count})
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* CHARACTERS WORKSPACE */}
-        {mode === 'characters' && (
+        {mode === 'characters' && charViewMode === 'graph' && (
+          <CharacterRelationshipGraph
+            characters={filteredCharacters}
+            onSelectCharacter={(c) => {
+              setCharDraft({
+                ...c,
+                tags: c.tags ?? [],
+                linked_relationships: c.linked_relationships ?? [],
+                custom_fields: c.custom_fields ?? [],
+              });
+              setCharViewMode('edit');
+            }}
+          />
+        )}
+
+        {mode === 'characters' && charViewMode === 'edit' && (
           <div className="grid gap-6 lg:grid-cols-[250px_1fr]">
             {/* Grouped Character List */}
             <div className="space-y-4">
@@ -582,6 +982,9 @@ export default function StoryBibleWorkspace({
                     personality: '',
                     background: '',
                     relationships: '',
+                    free_notes: '',
+                    tags: [],
+                    linked_relationships: [],
                     custom_fields: [],
                     avatar_image_url: null,
                   })
@@ -606,6 +1009,8 @@ export default function StoryBibleWorkspace({
                       onClick={() =>
                         setCharDraft({
                           ...c,
+                          tags: c.tags ?? [],
+                          linked_relationships: c.linked_relationships ?? [],
                           custom_fields: c.custom_fields ?? [],
                         })
                       }
@@ -632,6 +1037,18 @@ export default function StoryBibleWorkspace({
                           {c.name}
                         </p>
                         <p className="text-[11px] text-stone-500">{c.role}</p>
+                        {(c.tags ?? []).length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {(c.tags ?? []).slice(0, 3).map((t) => (
+                              <span
+                                key={t}
+                                className="rounded bg-amber-50 px-1 text-[9px] font-medium text-amber-800"
+                              >
+                                #{t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -654,11 +1071,37 @@ export default function StoryBibleWorkspace({
               }}
               className="space-y-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-xs"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-bold text-stone-900">
                   {charDraft.id ? `인물 편집: ${charDraft.name}` : '새 인물 등록'}
                 </h3>
                 <div className="flex items-center gap-2">
+                  {/* Write mode switcher */}
+                  <div className="flex rounded-lg bg-stone-100 p-0.5 text-[11px]">
+                    {[
+                      { id: 'both', label: '양식+자유' },
+                      { id: 'structured', label: '양식만' },
+                      { id: 'free', label: '자유 서술' },
+                    ].map((wm) => (
+                      <button
+                        key={wm.id}
+                        type="button"
+                        onClick={() =>
+                          setCharWriteMode(
+                            wm.id as 'structured' | 'free' | 'both'
+                          )
+                        }
+                        className={`rounded-md px-2 py-1 font-medium ${
+                          charWriteMode === wm.id
+                            ? 'bg-white text-stone-900 shadow-xs'
+                            : 'text-stone-500'
+                        }`}
+                      >
+                        {wm.label}
+                      </button>
+                    ))}
+                  </div>
+
                   {charDraft.id && (
                     <button
                       type="button"
@@ -668,7 +1111,7 @@ export default function StoryBibleWorkspace({
                       className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
                     >
                       <Sparkles className="h-3.5 w-3.5" />
-                      AI 초상화 생성
+                      AI 초상화
                     </button>
                   )}
                   {charDraft.id && (
@@ -686,6 +1129,9 @@ export default function StoryBibleWorkspace({
                           personality: '',
                           background: '',
                           relationships: '',
+                          free_notes: '',
+                          tags: [],
+                          linked_relationships: [],
                           custom_fields: [],
                           avatar_image_url: null,
                         });
@@ -809,122 +1255,318 @@ export default function StoryBibleWorkspace({
                 </div>
               </div>
 
+              {/* Character Tags Input */}
               <div>
-                <label className="mb-1 block text-xs font-semibold text-stone-700">
-                  외모 및 복장 묘사
+                <label className="mb-1 flex items-center gap-1 text-xs font-semibold text-stone-700">
+                  <Hash className="h-3.5 w-3.5 text-amber-600" />
+                  캐릭터 태그 (모아보기 지원)
                 </label>
-                <textarea
-                  rows={2}
-                  value={charDraft.appearance ?? ''}
-                  onChange={(e) =>
-                    setCharDraft({ ...charDraft, appearance: e.target.value })
-                  }
-                  className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs leading-relaxed"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-stone-700">
-                  성격, 가치관 및 말투
-                </label>
-                <textarea
-                  rows={2}
-                  value={charDraft.personality ?? ''}
-                  onChange={(e) =>
-                    setCharDraft({
-                      ...charDraft,
-                      personality: e.target.value,
-                    })
-                  }
-                  className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs leading-relaxed"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-stone-700">
-                  과거 배경 스토리 및 관계
-                </label>
-                <textarea
-                  rows={2}
-                  value={charDraft.background ?? ''}
-                  onChange={(e) =>
-                    setCharDraft({ ...charDraft, background: e.target.value })
-                  }
-                  className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs leading-relaxed"
-                />
-              </div>
-
-              {/* Custom Character Attributes */}
-              <div className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/60 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h4 className="text-xs font-bold text-stone-800">
-                      커스텀 세부 설정 (사용자 자유 추가)
-                    </h4>
-                    <p className="text-[11px] text-stone-500">
-                      성격, 가치관, 말투, 트라우마 등 원하는 항목을 직접 만들어
-                      추가하세요.
-                    </p>
-                  </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddTag();
+                      }
+                    }}
+                    placeholder="태그 입력 후 Enter (예: 마법사, 흑막, 1부 주역)"
+                    className="flex-1 rounded-lg border border-stone-300 px-3 py-1.5 text-xs focus:border-amber-500 focus:outline-none"
+                  />
                   <button
                     type="button"
-                    onClick={() => addCustomField('')}
-                    className="inline-flex items-center gap-1 rounded-lg bg-stone-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-stone-800"
+                    onClick={handleAddTag}
+                    className="rounded-lg border border-stone-300 bg-stone-50 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100"
                   >
-                    <Plus className="h-3.5 w-3.5" />
-                    항목 추가
+                    + 추가
+                  </button>
+                </div>
+                {(charDraft.tags ?? []).length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {(charDraft.tags ?? []).map((t) => (
+                      <span
+                        key={t}
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-medium text-amber-900"
+                      >
+                        #{t}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTag(t)}
+                          className="text-amber-700 hover:text-red-600"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Structured Fields */}
+              {(charWriteMode === 'structured' || charWriteMode === 'both') && (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-700">
+                      외모 및 복장 묘사
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={charDraft.appearance ?? ''}
+                      onChange={(e) =>
+                        setCharDraft({
+                          ...charDraft,
+                          appearance: e.target.value,
+                        })
+                      }
+                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs leading-relaxed"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-700">
+                      성격, 가치관 및 말투
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={charDraft.personality ?? ''}
+                      onChange={(e) =>
+                        setCharDraft({
+                          ...charDraft,
+                          personality: e.target.value,
+                        })
+                      }
+                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs leading-relaxed"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-stone-700">
+                      과거 배경 스토리 및 관계
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={charDraft.background ?? ''}
+                      onChange={(e) =>
+                        setCharDraft({
+                          ...charDraft,
+                          background: e.target.value,
+                        })
+                      }
+                      className="w-full rounded-lg border border-stone-300 px-3 py-2 text-xs leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Custom Character Attributes */}
+                  <div className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/60 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-xs font-bold text-stone-800">
+                          커스텀 세부 설정 (사용자 자유 추가)
+                        </h4>
+                        <p className="text-[11px] text-stone-500">
+                          성격, 가치관, 말투, 트라우마 등 원하는 항목을 직접
+                          만들어 추가하세요.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => addCustomField('')}
+                        className="inline-flex items-center gap-1 rounded-lg bg-stone-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-stone-800"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        항목 추가
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="text-[11px] text-stone-400">
+                        빠른 추가:
+                      </span>
+                      {SUGGESTED_CHAR_TRAITS.map((trait) => (
+                        <button
+                          key={trait}
+                          type="button"
+                          onClick={() => addCustomField(trait)}
+                          className="rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-stone-600 ring-1 ring-stone-200 hover:bg-amber-50 hover:text-amber-800"
+                        >
+                          + {trait}
+                        </button>
+                      ))}
+                    </div>
+
+                    {(charDraft.custom_fields ?? []).length > 0 && (
+                      <div className="space-y-2 pt-1">
+                        {(charDraft.custom_fields ?? []).map((field, idx) => (
+                          <div
+                            key={idx}
+                            className="flex flex-col gap-2 rounded-lg border border-stone-200 bg-white p-2.5 sm:flex-row sm:items-start"
+                          >
+                            <input
+                              type="text"
+                              value={field.label}
+                              onChange={(e) =>
+                                updateCustomField(idx, {
+                                  label: e.target.value,
+                                })
+                              }
+                              placeholder="항목명 (예: 말투)"
+                              className="w-full rounded-md border border-stone-300 px-2.5 py-1.5 text-xs font-semibold sm:w-36"
+                            />
+                            <textarea
+                              rows={2}
+                              value={field.value}
+                              onChange={(e) =>
+                                updateCustomField(idx, {
+                                  value: e.target.value,
+                                })
+                              }
+                              placeholder="세부 설정 내용을 입력하세요..."
+                              className="flex-1 rounded-md border border-stone-300 px-2.5 py-1.5 text-xs leading-relaxed"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeCustomField(idx)}
+                              className="self-end rounded-md p-1.5 text-stone-400 hover:bg-red-50 hover:text-red-600 sm:self-start"
+                              title="항목 삭제"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Free-form Narrative Notes */}
+              {(charWriteMode === 'free' || charWriteMode === 'both') && (
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-stone-700">
+                    자유 서술 노트 (형식 제한 없이 자유롭게 캐릭터 설정 메모)
+                  </label>
+                  <textarea
+                    rows={charWriteMode === 'free' ? 12 : 5}
+                    value={charDraft.free_notes ?? ''}
+                    onChange={(e) =>
+                      setCharDraft({ ...charDraft, free_notes: e.target.value })
+                    }
+                    placeholder="양식에 구애받지 않고 캐릭터의 대사 톤, 숨겨진 서사, 작가 메모 등을 자유롭게 적어보세요..."
+                    className="w-full rounded-xl border border-stone-300 bg-stone-50/40 px-3.5 py-2.5 text-xs leading-relaxed focus:border-amber-500 focus:bg-white focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {/* Character-to-Character Relationship Links */}
+              <div className="space-y-3 rounded-xl border border-stone-200 bg-stone-50/60 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="flex items-center gap-1.5 text-xs font-bold text-stone-800">
+                      <Network className="h-3.5 w-3.5 text-amber-600" />
+                      인물 간 관계도 연결
+                    </h4>
+                    <p className="text-[11px] text-stone-500">
+                      다른 등장인물을 연결해 관계도를 구성하세요. 상단 [인물
+                      관계도 보기]에서 한눈에 볼 수 있습니다.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-[1fr_130px_1fr_auto]">
+                  <select
+                    value={relTargetId}
+                    onChange={(e) => setRelTargetId(e.target.value)}
+                    className="rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
+                  >
+                    <option value="">연결할 인물 선택...</option>
+                    {characters
+                      .filter((c) => c.id !== charDraft.id)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.role})
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    type="text"
+                    list="relation-presets"
+                    value={relType}
+                    onChange={(e) => setRelType(e.target.value)}
+                    placeholder="관계 (예: 라이벌)"
+                    className="rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
+                  />
+                  <datalist id="relation-presets">
+                    {RELATION_PRESETS.map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
+                  <input
+                    type="text"
+                    value={relDesc}
+                    onChange={(e) => setRelDesc(e.target.value)}
+                    placeholder="관계 설명 (선택)"
+                    className="rounded-lg border border-stone-300 bg-white px-2.5 py-1.5 text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddRelationLink}
+                    disabled={!relTargetId || !relType.trim()}
+                    className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800 disabled:opacity-40"
+                  >
+                    + 연결
                   </button>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5">
-                  <span className="text-[11px] text-stone-400">빠른 추가:</span>
-                  {SUGGESTED_CHAR_TRAITS.map((trait) => (
-                    <button
-                      key={trait}
-                      type="button"
-                      onClick={() => addCustomField(trait)}
-                      className="rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-stone-600 ring-1 ring-stone-200 hover:bg-amber-50 hover:text-amber-800"
-                    >
-                      + {trait}
-                    </button>
-                  ))}
-                </div>
-
-                {(charDraft.custom_fields ?? []).length > 0 && (
-                  <div className="space-y-2 pt-1">
-                    {(charDraft.custom_fields ?? []).map((field, idx) => (
-                      <div
-                        key={idx}
-                        className="flex flex-col gap-2 rounded-lg border border-stone-200 bg-white p-2.5 sm:flex-row sm:items-start"
-                      >
-                        <input
-                          type="text"
-                          value={field.label}
-                          onChange={(e) =>
-                            updateCustomField(idx, { label: e.target.value })
-                          }
-                          placeholder="항목명 (예: 말투)"
-                          className="w-full rounded-md border border-stone-300 px-2.5 py-1.5 text-xs font-semibold sm:w-36"
-                        />
-                        <textarea
-                          rows={2}
-                          value={field.value}
-                          onChange={(e) =>
-                            updateCustomField(idx, { value: e.target.value })
-                          }
-                          placeholder="세부 설정 내용을 입력하세요..."
-                          className="flex-1 rounded-md border border-stone-300 px-2.5 py-1.5 text-xs leading-relaxed"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeCustomField(idx)}
-                          className="self-end rounded-md p-1.5 text-stone-400 hover:bg-red-50 hover:text-red-600 sm:self-start"
-                          title="항목 삭제"
+                {(charDraft.linked_relationships ?? []).length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    {(charDraft.linked_relationships ?? []).map((rel, idx) => {
+                      const target = characters.find(
+                        (c) => c.id === rel.targetCharacterId
+                      );
+                      return (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                              {rel.relationType}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (target) {
+                                  setCharDraft({
+                                    ...target,
+                                    tags: target.tags ?? [],
+                                    linked_relationships:
+                                      target.linked_relationships ?? [],
+                                    custom_fields: target.custom_fields ?? [],
+                                  });
+                                }
+                              }}
+                              className="font-bold text-stone-900 hover:text-amber-700 hover:underline"
+                            >
+                              {target ? target.name : '알 수 없는 인물'}
+                            </button>
+                            {rel.description && (
+                              <span className="text-stone-500">
+                                — {rel.description}
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveRelationLink(idx)}
+                            className="rounded p-1 text-stone-400 hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

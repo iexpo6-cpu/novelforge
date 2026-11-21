@@ -64,14 +64,26 @@ export function buildNovelContext(input: NovelContextInput): string {
   );
 
   if (includeCharacters && characters.length > 0) {
+    const charById = new Map(characters.map((c) => [c.id, c.name]));
     const charLines = characters.map((c) => {
+      const linkedRels = (c.linked_relationships ?? [])
+        .map((r) => {
+          const targetName = charById.get(r.targetCharacterId);
+          if (!targetName) return null;
+          return `${targetName}(${r.relationType}${r.description ? `: ${r.description}` : ''})`;
+        })
+        .filter(Boolean);
+
       const details = [
         c.role ? `역할: ${c.role}` : null,
         c.age ? `나이: ${c.age}` : null,
+        (c.tags ?? []).length > 0 ? `태그: ${(c.tags ?? []).join(', ')}` : null,
         c.appearance ? `외모: ${c.appearance}` : null,
         c.personality ? `성격: ${c.personality}` : null,
         c.background ? `배경: ${c.background}` : null,
         c.relationships ? `관계: ${c.relationships}` : null,
+        linkedRels.length > 0 ? `연결 관계도: ${linkedRels.join(', ')}` : null,
+        c.free_notes ? `자유 서술: ${c.free_notes}` : null,
         ...(c.custom_fields ?? [])
           .filter((f) => f.label.trim() && f.value.trim())
           .map((f) => `${f.label}: ${f.value}`),

@@ -30,6 +30,12 @@ export interface CharacterCustomField {
   value: string;
 }
 
+export interface CharacterRelationLink {
+  targetCharacterId: string;
+  relationType: string;
+  description: string;
+}
+
 export interface Character {
   id: string;
   project_id: string;
@@ -41,6 +47,9 @@ export interface Character {
   personality: string;
   background: string;
   relationships: string;
+  free_notes?: string;
+  tags?: string[];
+  linked_relationships?: CharacterRelationLink[];
   custom_fields?: CharacterCustomField[];
   avatar_image_url: string | null;
   created_at: string;

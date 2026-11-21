@@ -91,7 +91,7 @@ export async function POST(request: Request) {
 
     const schemaInstruction =
       targetType === 'character'
-        ? `JSON 스키마: {"name": string, "role": string, "age": string, "appearance": string, "personality": string, "background": string, "relationships": string, "custom_fields": [{"label": string, "value": string}]}${customFieldsPrompt}`
+        ? `JSON 스키마: {"name": string, "role": string, "age": string, "tags": string[], "appearance": string, "personality": string, "background": string, "relationships": string, "free_notes": string, "custom_fields": [{"label": string, "value": string}]}${customFieldsPrompt}`
         : targetType === 'world'
           ? 'JSON 스키마: {"category": "장소"|"마법/기술"|"세력/조직"|"역사/사건"|"규칙/기타", "title": string, "description": string}'
           : 'JSON 스키마: {"act_label": "기"|"승"|"전"|"결"|"에필로그", "title": string, "description": string}';
