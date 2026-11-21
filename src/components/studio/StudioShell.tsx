@@ -876,6 +876,10 @@ export default function StudioShell({
               onChangeStatus={handleChangeChapterStatus}
               onGenerateSummary={handleGenerateSummary}
               onExportMarkdown={handleExportMarkdown}
+              canDeleteChapter={chapters.length > 1}
+              onDeleteChapter={() => {
+                if (activeChapter) handleDeleteChapter(activeChapter.id);
+              }}
               onAskAIWithSelection={(excerpt) => {
                 setSelectedExcerpt(excerpt);
                 setRightTab('assistant');

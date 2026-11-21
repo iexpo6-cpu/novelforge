@@ -369,7 +369,7 @@ export default function LeftSidebar({
                         e.stopPropagation();
                         onDeleteChapter(chap.id);
                       }}
-                      className="ml-2 rounded p-1 text-stone-400 opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600"
+                      className="ml-2 rounded p-1.5 text-stone-400 transition hover:bg-red-50 hover:text-red-600"
                       title="회차 삭제"
                     >
                       <Trash2 className="h-3.5 w-3.5" />

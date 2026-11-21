@@ -44,6 +44,8 @@ interface ChapterEditorProps {
   onChangeStatus: (status: ChapterStatus) => void;
   onGenerateSummary: () => Promise<void>;
   onExportMarkdown: () => void;
+  onDeleteChapter?: () => void;
+  canDeleteChapter?: boolean;
   onAskAIWithSelection: (
     selectedText: string,
     quickMode?: 'chat' | 'polish' | 'feedback'
@@ -78,6 +80,8 @@ export default function ChapterEditor({
   onChangeStatus,
   onGenerateSummary,
   onExportMarkdown,
+  onDeleteChapter,
+  canDeleteChapter = false,
   onAskAIWithSelection,
 }: ChapterEditorProps) {
   const [summarizing, setSummarizing] = useState(false);
@@ -506,6 +510,17 @@ export default function ChapterEditor({
             <Download className="h-3.5 w-3.5" />
             내보내기 (.md)
           </button>
+          {canDeleteChapter && onDeleteChapter && (
+            <button
+              type="button"
+              onClick={onDeleteChapter}
+              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-100"
+              title="현재 회차 삭제"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              회차 삭제
+            </button>
+          )}
         </div>
       </div>
 
