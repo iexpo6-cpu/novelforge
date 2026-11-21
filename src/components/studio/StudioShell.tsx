@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, BookOpen, Settings, X, PenTool, Users, Globe, GitBranch } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
@@ -32,6 +32,60 @@ interface StudioShellProps {
   initialPlotNodes: PlotNode[];
   initialImages: ProjectImage[];
   initialMessages: AIChatMessage[];
+}
+
+type GroupStore = {
+  characters: string[];
+  world: string[];
+  plot: string[];
+};
+
+const EMPTY_GROUPS: GroupStore = { characters: [], world: [], plot: [] };
+const groupListeners = new Set<() => void>();
+let cachedGroupKey = '';
+let cachedGroupRaw: string | null = null;
+let cachedGroupParsed: GroupStore = EMPTY_GROUPS;
+
+function getGroupSnapshot(storageKey: string): GroupStore {
+  if (typeof window === 'undefined') return EMPTY_GROUPS;
+  const raw = window.localStorage.getItem(storageKey);
+  if (storageKey === cachedGroupKey && raw === cachedGroupRaw) {
+    return cachedGroupParsed;
+  }
+  cachedGroupKey = storageKey;
+  cachedGroupRaw = raw;
+  if (!raw) {
+    cachedGroupParsed = EMPTY_GROUPS;
+    return cachedGroupParsed;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Partial<GroupStore>;
+    cachedGroupParsed = {
+      characters: Array.isArray(parsed.characters) ? parsed.characters : [],
+      world: Array.isArray(parsed.world) ? parsed.world : [],
+      plot: Array.isArray(parsed.plot) ? parsed.plot : [],
+    };
+  } catch {
+    cachedGroupParsed = EMPTY_GROUPS;
+  }
+  return cachedGroupParsed;
+}
+
+function subscribeGroupStore(callback: () => void) {
+  groupListeners.add(callback);
+  return () => {
+    groupListeners.delete(callback);
+  };
+}
+
+function writeGroupStore(storageKey: string, next: GroupStore) {
+  if (typeof window === 'undefined') return;
+  const raw = JSON.stringify(next);
+  window.localStorage.setItem(storageKey, raw);
+  cachedGroupKey = storageKey;
+  cachedGroupRaw = raw;
+  cachedGroupParsed = next;
+  groupListeners.forEach((cb) => cb());
 }
 
 export default function StudioShell({
@@ -69,11 +123,12 @@ export default function StudioShell({
   const [imageTargetType, setImageTargetType] =
     useState<ImageTargetType>('cover');
   const [imageTargetId, setImageTargetId] = useState<string>('');
-  const [extraGroups, setExtraGroups] = useState<{
-    characters: string[];
-    world: string[];
-    plot: string[];
-  }>({ characters: [], world: [], plot: [] });
+  const groupStorageKey = `novelforge_groups_${project.id}`;
+  const extraGroups = useSyncExternalStore(
+    subscribeGroupStore,
+    () => getGroupSnapshot(groupStorageKey),
+    () => EMPTY_GROUPS
+  );
   const [focusedItem, setFocusedItem] = useState<{
     kind: BibleWorkspaceMode;
     id: string;
@@ -86,12 +141,12 @@ export default function StudioShell({
   ) {
     const trimmed = groupName.trim();
     if (!trimmed) return;
-    setExtraGroups((prev) => ({
-      ...prev,
-      [kind]: prev[kind].includes(trimmed)
-        ? prev[kind]
-        : [...prev[kind], trimmed],
-    }));
+    const current = getGroupSnapshot(groupStorageKey);
+    if (current[kind].includes(trimmed)) return;
+    writeGroupStore(groupStorageKey, {
+      ...current,
+      [kind]: [...current[kind], trimmed],
+    });
   }
 
   async function handleDeleteGroup(
@@ -99,10 +154,11 @@ export default function StudioShell({
     groupName: string
   ) {
     if (!groupName || groupName === '미분류') return;
-    setExtraGroups((prev) => ({
-      ...prev,
-      [kind]: prev[kind].filter((g) => g !== groupName),
-    }));
+    const current = getGroupSnapshot(groupStorageKey);
+    writeGroupStore(groupStorageKey, {
+      ...current,
+      [kind]: current[kind].filter((g) => g !== groupName),
+    });
 
     const supabase = createClient();
     const table =
