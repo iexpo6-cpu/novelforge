@@ -12,6 +12,7 @@ import {
   Image as ImageIcon,
   Loader2,
   PlusCircle,
+  X,
 } from 'lucide-react';
 import { buildAIHeaders } from '@/lib/ai/client-key';
 import type {
@@ -43,6 +44,8 @@ interface RightAIPanelProps {
   onChangeTargetType: (type: ImageTargetType) => void;
   targetId: string;
   onChangeTargetId: (id: string) => void;
+  selectedExcerpt: string;
+  onClearExcerpt: () => void;
 }
 
 const STYLE_PRESETS = [
@@ -79,6 +82,8 @@ export default function RightAIPanel({
   onChangeTargetType,
   targetId,
   onChangeTargetId,
+  selectedExcerpt,
+  onClearExcerpt,
 }: RightAIPanelProps) {
   // AI Assistant state
   const [promptInput, setPromptInput] = useState('');
@@ -99,8 +104,12 @@ export default function RightAIPanel({
   const [lastGeneratedUrl, setLastGeneratedUrl] = useState<string | null>(null);
 
   async function runAssistant(actionType: AIActionType, customPrompt?: string) {
-    const finalPrompt = (customPrompt ?? promptInput).trim();
-    if (!finalPrompt || loadingAI) return;
+    const rawPrompt = (customPrompt ?? promptInput).trim();
+    if (!rawPrompt || loadingAI) return;
+
+    const finalPrompt = selectedExcerpt.trim()
+      ? `[선택한 원고 발췌]\n"""\n${selectedExcerpt.trim()}\n"""\n\n[요청]\n${rawPrompt}`
+      : rawPrompt;
 
     setLoadingAI(true);
     setAiError(null);
@@ -117,6 +126,7 @@ export default function RightAIPanel({
 
     onMessagesChange((prev) => [...prev, optimisticUserMsg]);
     if (!customPrompt) setPromptInput('');
+    if (selectedExcerpt.trim()) onClearExcerpt();
 
     try {
       const res = await fetch('/api/ai/assist', {
@@ -404,6 +414,26 @@ export default function RightAIPanel({
             }}
             className="border-t border-stone-200 bg-white p-3"
           >
+            {selectedExcerpt && (
+              <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[11px]">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="font-bold text-amber-800">
+                    선택한 원고 발췌 (이 부분에 대해 질문)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onClearExcerpt}
+                    className="rounded p-0.5 text-amber-700 hover:bg-amber-200/60"
+                    title="발췌 취소"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <p className="line-clamp-3 whitespace-pre-line text-stone-700">
+                  {selectedExcerpt}
+                </p>
+              </div>
+            )}
             <div className="flex gap-2">
               <textarea
                 rows={2}

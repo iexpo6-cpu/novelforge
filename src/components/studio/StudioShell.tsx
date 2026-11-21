@@ -123,6 +123,7 @@ export default function StudioShell({
   const [imageTargetType, setImageTargetType] =
     useState<ImageTargetType>('cover');
   const [imageTargetId, setImageTargetId] = useState<string>('');
+  const [selectedExcerpt, setSelectedExcerpt] = useState<string>('');
   const groupStorageKey = `novelforge_groups_${project.id}`;
   const extraGroups = useSyncExternalStore(
     subscribeGroupStore,
@@ -563,21 +564,21 @@ export default function StudioShell({
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-stone-50">
+    <div className="flex h-dvh flex-col overflow-hidden bg-stone-50">
       {/* Studio Header */}
-      <header className="flex h-13 shrink-0 items-center justify-between border-b border-stone-200 bg-white px-4">
-        <div className="flex items-center gap-3">
+      <header className="flex h-13 shrink-0 items-center justify-between border-b border-stone-200 bg-white px-3 sm:px-4">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <Link
             href="/dashboard"
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-stone-600 transition hover:bg-stone-100"
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-stone-600 transition hover:bg-stone-100"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
-            대시보드
+            <span className="hidden sm:inline">대시보드</span>
           </Link>
-          <div className="h-4 w-px bg-stone-200" />
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-4 w-4 text-amber-600" />
-            <h1 className="max-w-[200px] truncate font-serif text-sm font-bold text-stone-900 sm:max-w-xs">
+          <div className="h-4 w-px shrink-0 bg-stone-200" />
+          <div className="flex min-w-0 items-center gap-2">
+            <BookOpen className="h-4 w-4 shrink-0 text-amber-600" />
+            <h1 className="truncate font-serif text-sm font-bold text-stone-900">
               {project.title}
             </h1>
             <span className="hidden rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-600 sm:inline">
@@ -616,37 +617,68 @@ export default function StudioShell({
           })}
         </div>
 
-        {/* Mobile Pane Switcher */}
-        <div className="flex items-center gap-1 rounded-lg bg-stone-100 p-0.5 lg:hidden">
-          {[
-            { id: 'left', label: '설정집' },
-            { id: 'editor', label: '집필' },
-            { id: 'right', label: 'AI' },
-          ].map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setMobilePane(p.id as 'left' | 'editor' | 'right')}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                mobilePane === p.id
-                  ? 'bg-white text-stone-900 shadow-xs'
-                  : 'text-stone-500'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
         <button
           type="button"
           onClick={() => setShowProjectModal(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100"
         >
           <Settings className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">작품 정보</span>
         </button>
       </header>
+
+      {/* Mobile & Tablet Unified Navigation Bar */}
+      <nav className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-stone-200 bg-white px-3 py-1.5 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setMobilePane('left')}
+          className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+            mobilePane === 'left'
+              ? 'bg-stone-900 text-white'
+              : 'bg-stone-100 text-stone-600'
+          }`}
+        >
+          목록·갤러리
+        </button>
+        {[
+          { id: 'editor', label: '집필', icon: PenTool },
+          { id: 'characters', label: '캐릭터 상세', icon: Users },
+          { id: 'world', label: '세계관 백과', icon: Globe },
+          { id: 'plot', label: '줄거리 보드', icon: GitBranch },
+        ].map((item) => {
+          const Icon = item.icon;
+          const active = mobilePane === 'editor' && centerMode === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setCenterMode(item.id as 'editor' | BibleWorkspaceMode);
+                setMobilePane('editor');
+              }}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                active
+                  ? 'bg-amber-500 text-stone-950'
+                  : 'bg-stone-100 text-stone-600'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {item.label}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setMobilePane('right')}
+          className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+            mobilePane === 'right'
+              ? 'bg-stone-900 text-white'
+              : 'bg-stone-100 text-stone-600'
+          }`}
+        >
+          AI 조수·이미지
+        </button>
+      </nav>
 
       {/* 3-Column Studio Body */}
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_1fr_360px]">
@@ -708,6 +740,11 @@ export default function StudioShell({
               onChangeStatus={handleChangeChapterStatus}
               onGenerateSummary={handleGenerateSummary}
               onExportMarkdown={handleExportMarkdown}
+              onAskAIWithSelection={(excerpt) => {
+                setSelectedExcerpt(excerpt);
+                setRightTab('assistant');
+                setMobilePane('right');
+              }}
             />
           ) : (
             <StoryBibleWorkspace
@@ -767,6 +804,8 @@ export default function StudioShell({
             onChangeTargetType={setImageTargetType}
             targetId={imageTargetId}
             onChangeTargetId={setImageTargetId}
+            selectedExcerpt={selectedExcerpt}
+            onClearExcerpt={() => setSelectedExcerpt('')}
           />
         </div>
       </div>

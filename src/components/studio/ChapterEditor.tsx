@@ -23,6 +23,10 @@ import {
   Search,
   X,
   Trash2,
+  ArrowUp,
+  ArrowDown,
+  MessageSquarePlus,
+  Wand2,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { ensureEditorHtml, stripHtml } from '@/lib/text-utils';
@@ -37,6 +41,10 @@ interface ChapterEditorProps {
   onChangeStatus: (status: ChapterStatus) => void;
   onGenerateSummary: () => Promise<void>;
   onExportMarkdown: () => void;
+  onAskAIWithSelection: (
+    selectedText: string,
+    quickMode?: 'chat' | 'polish' | 'feedback'
+  ) => void;
 }
 
 const FONT_OPTIONS = [
@@ -62,6 +70,7 @@ export default function ChapterEditor({
   onChangeStatus,
   onGenerateSummary,
   onExportMarkdown,
+  onAskAIWithSelection,
 }: ChapterEditorProps) {
   const [summarizing, setSummarizing] = useState(false);
   const [fontFamily, setFontFamily] = useState(FONT_OPTIONS[0].value);
@@ -76,6 +85,9 @@ export default function ChapterEditor({
   const [hasSelectedImage, setHasSelectedImage] = useState(false);
   const [imageWidthPct, setImageWidthPct] = useState(80);
   const selectedImgRef = useRef<HTMLImageElement | null>(null);
+
+  // Selected text for AI excerpt
+  const [selectedText, setSelectedText] = useState('');
 
   const editorRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -183,6 +195,49 @@ export default function ChapterEditor({
     selectedImgRef.current = null;
     setHasSelectedImage(false);
     syncFromDom();
+  }
+
+  function moveSelectedImage(direction: 'up' | 'down') {
+    const img = selectedImgRef.current;
+    const editor = editorRef.current;
+    if (!img || !editor) return;
+
+    // Move the wrapping block if the image is inside a paragraph/div inside the editor
+    const nodeToMove: HTMLElement =
+      img.parentElement && img.parentElement !== editor
+        ? img.parentElement
+        : img;
+
+    if (direction === 'up') {
+      const prev = nodeToMove.previousElementSibling;
+      if (prev) {
+        editor.insertBefore(nodeToMove, prev);
+        syncFromDom();
+      }
+    } else {
+      const next = nodeToMove.nextElementSibling;
+      if (next) {
+        editor.insertBefore(next, nodeToMove);
+        syncFromDom();
+      }
+    }
+  }
+
+  function handleSelectionCheck() {
+    const el = editorRef.current;
+    if (!el) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) {
+      setSelectedText('');
+      return;
+    }
+    const anchor = sel.anchorNode;
+    if (anchor && el.contains(anchor)) {
+      const text = sel.toString().trim();
+      setSelectedText(text.length >= 2 ? text : '');
+    } else {
+      setSelectedText('');
+    }
   }
 
   async function handleUploadImage(e: React.ChangeEvent<HTMLInputElement>) {
@@ -564,6 +619,26 @@ export default function ChapterEditor({
               우
             </button>
           </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => moveSelectedImage('up')}
+              className="inline-flex items-center gap-0.5 rounded bg-white px-2 py-0.5 text-[11px] font-medium ring-1 ring-amber-200 hover:bg-amber-100"
+              title="이전 문단 위로 이동"
+            >
+              <ArrowUp className="h-3 w-3" />
+              위로
+            </button>
+            <button
+              type="button"
+              onClick={() => moveSelectedImage('down')}
+              className="inline-flex items-center gap-0.5 rounded bg-white px-2 py-0.5 text-[11px] font-medium ring-1 ring-amber-200 hover:bg-amber-100"
+              title="다음 문단 아래로 이동"
+            >
+              <ArrowDown className="h-3 w-3" />
+              아래로
+            </button>
+          </div>
           <button
             type="button"
             onClick={deleteSelectedImage}
@@ -633,6 +708,8 @@ export default function ChapterEditor({
             suppressContentEditableWarning
             onInput={syncFromDom}
             onClick={handleEditorClick}
+            onMouseUp={handleSelectionCheck}
+            onKeyUp={handleSelectionCheck}
             data-placeholder="이곳에서 소설의 이야기를 펼쳐보세요..."
             style={{
               fontFamily,
@@ -643,6 +720,62 @@ export default function ChapterEditor({
           />
         </div>
       </div>
+
+      {/* Selection AI Action Bar */}
+      {selectedText && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-stone-950">
+              선택됨
+            </span>
+            <span className="truncate text-stone-700">
+              &ldquo;{selectedText}&rdquo;
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                onAskAIWithSelection(selectedText, 'chat');
+                setSelectedText('');
+              }}
+              className="inline-flex items-center gap-1 rounded-lg bg-stone-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-stone-800"
+            >
+              <MessageSquarePlus className="h-3 w-3" />
+              AI 질문
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onAskAIWithSelection(selectedText, 'polish');
+                setSelectedText('');
+              }}
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
+            >
+              <Wand2 className="h-3 w-3" />
+              이 부분 윤문
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onAskAIWithSelection(selectedText, 'feedback');
+                setSelectedText('');
+              }}
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
+            >
+              <Sparkles className="h-3 w-3" />
+              피드백
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedText('')}
+              className="rounded p-1 text-stone-400 hover:text-stone-700"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Stats Bar */}
       <div className="flex items-center justify-between border-t border-stone-200 bg-white px-6 py-2 text-[11px] text-stone-500">
