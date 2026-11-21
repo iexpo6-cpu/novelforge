@@ -32,9 +32,12 @@ import { createClient } from '@/lib/supabase/client';
 import { ensureEditorHtml, stripHtml } from '@/lib/text-utils';
 import type { Chapter, ChapterStatus } from '@/types/novel';
 
+export type EditorTheme = 'light' | 'sepia' | 'dark';
+
 interface ChapterEditorProps {
   projectId: string;
   chapter: Chapter | null;
+  theme: EditorTheme;
   savingState: 'idle' | 'saving' | 'saved' | 'error';
   onChangeTitle: (title: string) => void;
   onChangeContent: (content: string) => void;
@@ -61,9 +64,14 @@ const FONT_OPTIONS = [
   { label: '고정폭 (타자기)', value: 'ui-monospace, monospace' },
 ];
 
+function buildSceneImageName(ext: string): string {
+  return `scene-${Date.now()}.${ext}`;
+}
+
 export default function ChapterEditor({
   projectId,
   chapter,
+  theme,
   savingState,
   onChangeTitle,
   onChangeContent,
@@ -81,18 +89,43 @@ export default function ChapterEditor({
   const [findQuery, setFindQuery] = useState('');
   const [replaceQuery, setReplaceQuery] = useState('');
 
-  // Selected image resize state
+  // PPT-style image overlay & drag state
   const [hasSelectedImage, setHasSelectedImage] = useState(false);
   const [imageWidthPct, setImageWidthPct] = useState(80);
+  const [overlayBox, setOverlayBox] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const selectedImgRef = useRef<HTMLImageElement | null>(null);
+  const draggedBlockRef = useRef<HTMLElement | null>(null);
 
   // Selected text for AI excerpt
   const [selectedText, setSelectedText] = useState('');
 
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const lastChapterIdRef = useRef<string | null>(null);
   const lastHtmlRef = useRef<string>('');
+
+  function refreshOverlayBox() {
+    const img = selectedImgRef.current;
+    const surface = surfaceRef.current;
+    if (!img || !surface || !surface.contains(img)) {
+      setOverlayBox(null);
+      return;
+    }
+    const imgRect = img.getBoundingClientRect();
+    const surfaceRect = surface.getBoundingClientRect();
+    setOverlayBox({
+      top: imgRect.top - surfaceRect.top + surface.scrollTop,
+      left: imgRect.left - surfaceRect.left + surface.scrollLeft,
+      width: imgRect.width,
+      height: imgRect.height,
+    });
+  }
 
   useEffect(() => {
     const el = editorRef.current;
@@ -150,17 +183,112 @@ export default function ChapterEditor({
     const target = e.target;
     if (target instanceof HTMLImageElement) {
       selectedImgRef.current = target;
+      target.draggable = true;
       setHasSelectedImage(true);
       const rawWidth = target.style.width || '';
       if (rawWidth.endsWith('%')) {
         setImageWidthPct(parseInt(rawWidth, 10) || 80);
-      } else {
-        setImageWidthPct(100);
+      } else if (editorRef.current) {
+        const pct = Math.round(
+          (target.getBoundingClientRect().width /
+            editorRef.current.getBoundingClientRect().width) *
+            100
+        );
+        setImageWidthPct(Math.min(100, Math.max(10, pct)));
       }
+      refreshOverlayBox();
     } else {
       selectedImgRef.current = null;
       setHasSelectedImage(false);
+      setOverlayBox(null);
     }
+  }
+
+  function startCornerResize(
+    e: React.PointerEvent<HTMLDivElement>,
+    direction: 'se' | 'sw' | 'ne' | 'nw'
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const img = selectedImgRef.current;
+    const editor = editorRef.current;
+    if (!img || !editor) return;
+
+    const startX = e.clientX;
+    const startWidthPx = img.getBoundingClientRect().width;
+    const editorWidthPx = editor.getBoundingClientRect().width || 600;
+    const sign = direction === 'se' || direction === 'ne' ? 1 : -1;
+
+    function onMove(ev: PointerEvent) {
+      const deltaX = (ev.clientX - startX) * sign;
+      const nextPx = Math.max(60, Math.min(editorWidthPx, startWidthPx + deltaX));
+      const pct = Math.round((nextPx / editorWidthPx) * 100);
+      const clamped = Math.min(100, Math.max(10, pct));
+      if (selectedImgRef.current) {
+        selectedImgRef.current.style.width = `${clamped}%`;
+        selectedImgRef.current.style.maxWidth = '100%';
+        selectedImgRef.current.style.height = 'auto';
+        setImageWidthPct(clamped);
+        refreshOverlayBox();
+      }
+    }
+
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      syncFromDom();
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  function handleEditorDragStart(e: React.DragEvent<HTMLDivElement>) {
+    const target = e.target;
+    const editor = editorRef.current;
+    if (!(target instanceof HTMLImageElement) || !editor) return;
+
+    const block: HTMLElement =
+      target.parentElement && target.parentElement !== editor
+        ? target.parentElement
+        : target;
+    draggedBlockRef.current = block;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', 'novelforge-image-move');
+  }
+
+  function handleEditorDragOver(e: React.DragEvent<HTMLDivElement>) {
+    if (!draggedBlockRef.current) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  function handleEditorDrop(e: React.DragEvent<HTMLDivElement>) {
+    const editor = editorRef.current;
+    const dragged = draggedBlockRef.current;
+    if (!dragged || !editor) return;
+    e.preventDefault();
+    draggedBlockRef.current = null;
+
+    let dropTarget = e.target as HTMLElement | null;
+    while (dropTarget && dropTarget.parentElement !== editor) {
+      dropTarget = dropTarget.parentElement;
+    }
+
+    if (dropTarget && dropTarget !== dragged && editor.contains(dropTarget)) {
+      const rect = dropTarget.getBoundingClientRect();
+      const insertAfter = e.clientY > rect.top + rect.height / 2;
+      if (insertAfter) {
+        editor.insertBefore(dragged, dropTarget.nextSibling);
+      } else {
+        editor.insertBefore(dragged, dropTarget);
+      }
+    } else {
+      editor.appendChild(dragged);
+    }
+
+    syncFromDom();
+    setTimeout(refreshOverlayBox, 0);
   }
 
   function updateSelectedImageWidth(pct: number) {
@@ -172,6 +300,7 @@ export default function ChapterEditor({
     img.style.maxWidth = '100%';
     img.style.height = 'auto';
     syncFromDom();
+    refreshOverlayBox();
   }
 
   function updateSelectedImageAlign(align: 'left' | 'center' | 'right') {
@@ -186,6 +315,7 @@ export default function ChapterEditor({
       img.style.margin = '12px 0 12px auto';
     }
     syncFromDom();
+    refreshOverlayBox();
   }
 
   function deleteSelectedImage() {
@@ -194,6 +324,7 @@ export default function ChapterEditor({
     img.remove();
     selectedImgRef.current = null;
     setHasSelectedImage(false);
+    setOverlayBox(null);
     syncFromDom();
   }
 
@@ -202,7 +333,6 @@ export default function ChapterEditor({
     const editor = editorRef.current;
     if (!img || !editor) return;
 
-    // Move the wrapping block if the image is inside a paragraph/div inside the editor
     const nodeToMove: HTMLElement =
       img.parentElement && img.parentElement !== editor
         ? img.parentElement
@@ -213,12 +343,14 @@ export default function ChapterEditor({
       if (prev) {
         editor.insertBefore(nodeToMove, prev);
         syncFromDom();
+        setTimeout(refreshOverlayBox, 0);
       }
     } else {
       const next = nodeToMove.nextElementSibling;
       if (next) {
         editor.insertBefore(next, nodeToMove);
         syncFromDom();
+        setTimeout(refreshOverlayBox, 0);
       }
     }
   }
@@ -252,7 +384,7 @@ export default function ChapterEditor({
       if (!user) throw new Error('로그인이 필요합니다.');
 
       const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
-      const storagePath = `${user.id}/${projectId}/scene-${Date.now()}.${ext}`;
+      const storagePath = `${user.id}/${projectId}/${buildSceneImageName(ext)}`;
 
       const { error: uploadErr } = await supabase.storage
         .from('novel-images')
@@ -270,7 +402,7 @@ export default function ChapterEditor({
       document.execCommand(
         'insertHTML',
         false,
-        `<p><img src="${urlData.publicUrl}" alt="삽화" style="width:75%;max-width:100%;height:auto;display:block;border-radius:12px;margin:12px auto;" /></p><p><br></p>`
+        `<p><img src="${urlData.publicUrl}" alt="삽화" draggable="true" style="width:75%;max-width:100%;height:auto;display:block;border-radius:12px;margin:12px auto;" /></p><p><br></p>`
       );
       syncFromDom();
     } catch (err) {
@@ -302,6 +434,20 @@ export default function ChapterEditor({
       setSummarizing(false);
     }
   }
+
+  const surfaceThemeClasses =
+    theme === 'dark'
+      ? 'bg-stone-900 text-stone-100'
+      : theme === 'sepia'
+        ? 'bg-[#f6eedc] text-[#3d3020]'
+        : 'bg-stone-50 text-stone-800';
+
+  const titleThemeClasses =
+    theme === 'dark'
+      ? 'text-white placeholder-stone-600'
+      : theme === 'sepia'
+        ? 'text-[#2b2115] placeholder-[#b9a78e]'
+        : 'text-stone-900 placeholder-stone-300';
 
   return (
     <main className="flex h-full flex-col bg-stone-50">
@@ -535,7 +681,7 @@ export default function ChapterEditor({
           disabled={uploadingImage}
           onClick={() => fileInputRef.current?.click()}
           className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium hover:bg-stone-100 disabled:opacity-50"
-          title="본문에 이미지 첨부 (클릭 후 크기 조절 가능)"
+          title="본문에 이미지 첨부 (클릭 후 모서리 드래그로 크기 조절, 이미지 드래그로 위치 이동)"
         >
           {uploadingImage ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -570,16 +716,8 @@ export default function ChapterEditor({
       {hasSelectedImage && (
         <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-6 py-2 text-xs">
           <span className="font-semibold text-amber-900">
-            선택된 이미지 크기: {imageWidthPct}%
+            이미지 {imageWidthPct}% (모서리 드래그로 크기 조절 · 본문 내 드래그로 위치 이동)
           </span>
-          <input
-            type="range"
-            min={10}
-            max={100}
-            value={imageWidthPct}
-            onChange={(e) => updateSelectedImageWidth(Number(e.target.value))}
-            className="w-28 accent-amber-600"
-          />
           <div className="flex items-center gap-1">
             {[25, 50, 75, 100].map((pct) => (
               <button
@@ -624,7 +762,6 @@ export default function ChapterEditor({
               type="button"
               onClick={() => moveSelectedImage('up')}
               className="inline-flex items-center gap-0.5 rounded bg-white px-2 py-0.5 text-[11px] font-medium ring-1 ring-amber-200 hover:bg-amber-100"
-              title="이전 문단 위로 이동"
             >
               <ArrowUp className="h-3 w-3" />
               위로
@@ -633,7 +770,6 @@ export default function ChapterEditor({
               type="button"
               onClick={() => moveSelectedImage('down')}
               className="inline-flex items-center gap-0.5 rounded bg-white px-2 py-0.5 text-[11px] font-medium ring-1 ring-amber-200 hover:bg-amber-100"
-              title="다음 문단 아래로 이동"
             >
               <ArrowDown className="h-3 w-3" />
               아래로
@@ -645,7 +781,7 @@ export default function ChapterEditor({
             className="ml-auto inline-flex items-center gap-1 rounded bg-red-50 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-100"
           >
             <Trash2 className="h-3 w-3" />
-            이미지 삭제
+            삭제
           </button>
         </div>
       )}
@@ -684,19 +820,23 @@ export default function ChapterEditor({
         </div>
       )}
 
-      {/* Writing Surface */}
-      <div className="flex-1 overflow-y-auto px-6 py-8 sm:px-12">
+      {/* Writing Surface with PPT-style Image Resize Overlay */}
+      <div
+        ref={surfaceRef}
+        onScroll={hasSelectedImage ? refreshOverlayBox : undefined}
+        className={`relative flex-1 overflow-y-auto px-6 py-8 transition-colors sm:px-12 ${surfaceThemeClasses}`}
+      >
         <div className="mx-auto max-w-3xl">
           <input
             type="text"
             value={chapter.title}
             onChange={(e) => onChangeTitle(e.target.value)}
             placeholder="회차 제목을 입력하세요..."
-            className="w-full border-none bg-transparent font-serif text-2xl font-bold text-stone-900 placeholder-stone-300 focus:outline-none"
+            className={`w-full border-none bg-transparent font-serif text-2xl font-bold focus:outline-none ${titleThemeClasses}`}
           />
 
           {chapter.summary && (
-            <div className="mt-4 rounded-xl border border-amber-200/80 bg-amber-50/50 px-4 py-3 text-xs leading-relaxed text-amber-900">
+            <div className="mt-4 rounded-xl border border-amber-200/80 bg-amber-50/80 px-4 py-3 text-xs leading-relaxed text-amber-900">
               <span className="mr-1.5 font-semibold">[회차 요약]</span>
               {chapter.summary}
             </div>
@@ -708,6 +848,9 @@ export default function ChapterEditor({
             suppressContentEditableWarning
             onInput={syncFromDom}
             onClick={handleEditorClick}
+            onDragStart={handleEditorDragStart}
+            onDragOver={handleEditorDragOver}
+            onDrop={handleEditorDrop}
             onMouseUp={handleSelectionCheck}
             onKeyUp={handleSelectionCheck}
             data-placeholder="이곳에서 소설의 이야기를 펼쳐보세요..."
@@ -716,9 +859,52 @@ export default function ChapterEditor({
               fontSize: `${fontSize}px`,
               lineHeight: 1.9,
             }}
-            className="mt-6 min-h-[65vh] w-full text-stone-800 focus:outline-none empty:before:text-stone-300 empty:before:content-[attr(data-placeholder)]"
+            className="mt-6 min-h-[65vh] w-full focus:outline-none empty:before:text-stone-400 empty:before:content-[attr(data-placeholder)]"
           />
         </div>
+
+        {/* PPT-style 4-corner Resize Handles Overlay */}
+        {hasSelectedImage && overlayBox && (
+          <div
+            style={{
+              top: overlayBox.top,
+              left: overlayBox.left,
+              width: overlayBox.width,
+              height: overlayBox.height,
+            }}
+            className="pointer-events-none absolute rounded-xl ring-2 ring-amber-500"
+          >
+            <span className="absolute -top-6 left-1/2 -translate-x-1/2 rounded bg-stone-900 px-2 py-0.5 text-[10px] font-bold text-white shadow">
+              {imageWidthPct}%
+            </span>
+            {(
+              [
+                {
+                  dir: 'nw',
+                  cls: '-top-1.5 -left-1.5 cursor-nwse-resize',
+                },
+                {
+                  dir: 'ne',
+                  cls: '-top-1.5 -right-1.5 cursor-nesw-resize',
+                },
+                {
+                  dir: 'sw',
+                  cls: '-bottom-1.5 -left-1.5 cursor-nesw-resize',
+                },
+                {
+                  dir: 'se',
+                  cls: '-bottom-1.5 -right-1.5 cursor-nwse-resize',
+                },
+              ] as const
+            ).map((handle) => (
+              <div
+                key={handle.dir}
+                onPointerDown={(e) => startCornerResize(e, handle.dir)}
+                className={`pointer-events-auto absolute h-3.5 w-3.5 rounded-full border-2 border-amber-600 bg-white shadow ${handle.cls}`}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Selection AI Action Bar */}
@@ -784,7 +970,7 @@ export default function ChapterEditor({
           <span>공백 제외 {charsNoSpace.toLocaleString()}자</span>
           <span>200자 원고지 약 {manuscriptPages.toLocaleString()}매</span>
         </div>
-        <span>이미지 클릭 시 크기·정렬 조절 가능</span>
+        <span>이미지 모서리 드래그 크기조절 · 드래그 위치이동</span>
       </div>
     </main>
   );

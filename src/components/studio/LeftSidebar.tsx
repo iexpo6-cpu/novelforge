@@ -13,6 +13,8 @@ import {
   CheckCircle2,
   Search,
   X,
+  Upload,
+  Download,
 } from 'lucide-react';
 import type {
   Chapter,
@@ -30,6 +32,8 @@ interface LeftSidebarProps {
   activeChapterId: string | null;
   onSelectChapter: (id: string) => void;
   onCreateChapter: () => void;
+  onImportChapterFile: (title: string, content: string) => Promise<void>;
+  onExportAllChaptersTxt: () => void;
   onDeleteChapter: (id: string) => void;
   characters: Character[];
   onSaveCharacter: (char: Partial<Character> & { id?: string }) => Promise<void>;
@@ -54,6 +58,8 @@ export default function LeftSidebar({
   activeChapterId,
   onSelectChapter,
   onCreateChapter,
+  onImportChapterFile,
+  onExportAllChaptersTxt,
   onDeleteChapter,
   characters,
   onSaveCharacter,
@@ -292,17 +298,48 @@ export default function LeftSidebar({
 
         {!normalizedQuery && tab === 'chapters' && (
           <div className="space-y-2">
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
               <span className="text-xs font-semibold text-stone-500">
                 총 {chapters.length}화
               </span>
-              <button
-                type="button"
-                onClick={onCreateChapter}
-                className="inline-flex items-center gap-1 rounded-lg bg-stone-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-stone-800"
-              >
-                <Plus className="h-3.5 w-3.5" />새 회차
-              </button>
+              <div className="flex items-center gap-1">
+                <label
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-700 hover:bg-stone-100"
+                  title=".txt 또는 .md 파일을 새 회차로 불러오기"
+                >
+                  <Upload className="h-3 w-3" />
+                  불러오기
+                  <input
+                    type="file"
+                    accept=".txt,.md"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const text = await file.text();
+                      const cleanTitle = file.name.replace(/\.(txt|md)$/i, '');
+                      await onImportChapterFile(cleanTitle, text);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={onExportAllChaptersTxt}
+                  className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-700 hover:bg-stone-100"
+                  title="전체 회차를 하나의 .txt 파일로 일괄 내보내기"
+                >
+                  <Download className="h-3 w-3" />
+                  전체 .txt
+                </button>
+                <button
+                  type="button"
+                  onClick={onCreateChapter}
+                  className="inline-flex items-center gap-1 rounded-lg bg-stone-900 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-stone-800"
+                >
+                  <Plus className="h-3 w-3" />새 회차
+                </button>
+              </div>
             </div>
             {chapters.map((chap) => {
               const isSelected = chap.id === activeChapterId;

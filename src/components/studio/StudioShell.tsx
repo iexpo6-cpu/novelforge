@@ -2,12 +2,12 @@
 
 import { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, BookOpen, Settings, X, PenTool, Users, Globe, GitBranch } from 'lucide-react';
+import { ArrowLeft, BookOpen, Settings, X, PenTool, Users, Globe, GitBranch, Sun, Moon, ScrollText } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { buildAIHeaders } from '@/lib/ai/client-key';
 import { ensureEditorHtml, stripHtml } from '@/lib/text-utils';
 import LeftSidebar from './LeftSidebar';
-import ChapterEditor from './ChapterEditor';
+import ChapterEditor, { type EditorTheme } from './ChapterEditor';
 import RightAIPanel from './RightAIPanel';
 import StoryBibleWorkspace, {
   type BibleWorkspaceMode,
@@ -88,6 +88,29 @@ function writeGroupStore(storageKey: string, next: GroupStore) {
   groupListeners.forEach((cb) => cb());
 }
 
+const themeListeners = new Set<() => void>();
+const THEME_KEY = 'novelforge_editor_theme';
+
+function getThemeSnapshot(): EditorTheme {
+  if (typeof window === 'undefined') return 'light';
+  const val = window.localStorage.getItem(THEME_KEY);
+  if (val === 'sepia' || val === 'dark' || val === 'light') return val;
+  return 'light';
+}
+
+function subscribeTheme(cb: () => void) {
+  themeListeners.add(cb);
+  return () => {
+    themeListeners.delete(cb);
+  };
+}
+
+function setEditorTheme(next: EditorTheme) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(THEME_KEY, next);
+  themeListeners.forEach((cb) => cb());
+}
+
 export default function StudioShell({
   initialProject,
   initialChapters,
@@ -119,7 +142,14 @@ export default function StudioShell({
     'editor'
   );
   const [showProjectModal, setShowProjectModal] = useState(false);
-  const [rightTab, setRightTab] = useState<'assistant' | 'image'>('assistant');
+  const [rightTab, setRightTab] = useState<'assistant' | 'image' | 'tracker'>(
+    'assistant'
+  );
+  const theme = useSyncExternalStore<EditorTheme>(
+    subscribeTheme,
+    getThemeSnapshot,
+    () => 'light'
+  );
   const [imageTargetType, setImageTargetType] =
     useState<ImageTargetType>('cover');
   const [imageTargetId, setImageTargetId] = useState<string>('');
@@ -277,6 +307,64 @@ export default function StudioShell({
       setActiveChapterId(created.id);
       setMobilePane('editor');
     }
+  }
+
+  async function handleImportChapterFile(title: string, rawContent: string) {
+    const supabase = createClient();
+    const nextIdx = chapters.length;
+    const htmlContent = ensureEditorHtml(rawContent);
+    const wordCount = stripHtml(htmlContent).length;
+
+    const { data, error } = await supabase
+      .from('chapters')
+      .insert({
+        project_id: project.id,
+        order_index: nextIdx,
+        title: title || `${nextIdx + 1}화. 불러온 원고`,
+        content: htmlContent,
+        word_count: wordCount,
+        status: 'draft',
+      })
+      .select()
+      .single();
+
+    if (!error && data) {
+      const created = data as Chapter;
+      setChapters((prev) => [...prev, created]);
+      setActiveChapterId(created.id);
+      setCenterMode('editor');
+      setMobilePane('editor');
+    }
+  }
+
+  function handleExportAllChaptersTxt() {
+    const sorted = [...chapters].sort((a, b) => a.order_index - b.order_index);
+    const header = [
+      `제목: ${project.title}`,
+      `장르: ${project.genre}`,
+      project.logline ? `로그라인: ${project.logline}` : '',
+      '========================================',
+      '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const body = sorted
+      .map(
+        (c) =>
+          `\n[${c.title}]\n----------------------------------------\n${stripHtml(c.content)}\n`
+      )
+      .join('\n');
+
+    const blob = new Blob([`${header}${body}`], {
+      type: 'text/plain;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${project.title.replace(/[\\/:*?"<>|]/g, '_')}_전체원고.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function handleDeleteChapter(id: string) {
@@ -617,14 +705,59 @@ export default function StudioShell({
           })}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowProjectModal(true)}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100"
-        >
-          <Settings className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">작품 정보</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Theme Switcher */}
+          <div
+            className="flex items-center rounded-lg border border-stone-200 bg-stone-50 p-0.5"
+            title="에디터 테마 변경"
+          >
+            <button
+              type="button"
+              onClick={() => setEditorTheme('light')}
+              className={`rounded p-1 ${
+                theme === 'light'
+                  ? 'bg-white text-amber-600 shadow-xs'
+                  : 'text-stone-400 hover:text-stone-700'
+              }`}
+              title="라이트 테마"
+            >
+              <Sun className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditorTheme('sepia')}
+              className={`rounded p-1 ${
+                theme === 'sepia'
+                  ? 'bg-[#f6eedc] text-amber-800 shadow-xs'
+                  : 'text-stone-400 hover:text-stone-700'
+              }`}
+              title="세피아(종이) 테마"
+            >
+              <ScrollText className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditorTheme('dark')}
+              className={`rounded p-1 ${
+                theme === 'dark'
+                  ? 'bg-stone-900 text-amber-400 shadow-xs'
+                  : 'text-stone-400 hover:text-stone-700'
+              }`}
+              title="다크 테마"
+            >
+              <Moon className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowProjectModal(true)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100"
+          >
+            <Settings className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">작품 정보</span>
+          </button>
+        </div>
       </header>
 
       {/* Mobile & Tablet Unified Navigation Bar */}
@@ -696,6 +829,8 @@ export default function StudioShell({
               setMobilePane('editor');
             }}
             onCreateChapter={handleCreateChapter}
+            onImportChapterFile={handleImportChapterFile}
+            onExportAllChaptersTxt={handleExportAllChaptersTxt}
             onDeleteChapter={handleDeleteChapter}
             characters={characters}
             onSaveCharacter={handleSaveCharacter}
@@ -734,6 +869,7 @@ export default function StudioShell({
             <ChapterEditor
               projectId={project.id}
               chapter={activeChapter}
+              theme={theme}
               savingState={savingState}
               onChangeTitle={handleChangeChapterTitle}
               onChangeContent={handleChangeChapterContent}
@@ -792,6 +928,7 @@ export default function StudioShell({
           <RightAIPanel
             projectId={project.id}
             activeChapter={activeChapter}
+            chapters={chapters}
             characters={characters}
             worldSettings={worldSettings}
             messages={messages}
