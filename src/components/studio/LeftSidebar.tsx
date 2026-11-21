@@ -42,6 +42,7 @@ interface LeftSidebarProps {
   onDeletePlot: (id: string) => Promise<void>;
   extraGroups: { characters: string[]; world: string[]; plot: string[] };
   onAddGroup: (kind: 'characters' | 'world' | 'plot', name: string) => void;
+  onDeleteGroup: (kind: 'characters' | 'world' | 'plot', name: string) => Promise<void>;
   onNavigateBibleItem: (kind: 'characters' | 'world' | 'plot', id: string) => void;
   images: ProjectImage[];
   onSetCoverImage: (imageUrl: string) => Promise<void>;
@@ -65,6 +66,7 @@ export default function LeftSidebar({
   onDeletePlot,
   extraGroups,
   onAddGroup,
+  onDeleteGroup,
   onNavigateBibleItem,
   images,
   onSetCoverImage,
@@ -371,6 +373,19 @@ export default function LeftSidebar({
                 >
                   + 분류
                 </button>
+                {charFolderFilter !== '전체' && charFolderFilter !== '미분류' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onDeleteGroup('characters', charFolderFilter);
+                      setCharFolderFilter('전체');
+                    }}
+                    className="rounded-lg p-1 text-stone-400 hover:bg-red-50 hover:text-red-600"
+                    title="선택한 분류 삭제 (인물은 미분류로 이동)"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
               <button
                 type="button"
@@ -609,6 +624,20 @@ export default function LeftSidebar({
                 >
                   + 분류
                 </button>
+                {worldFolderFilter !== '전체' &&
+                  worldFolderFilter !== '미분류' && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await onDeleteGroup('world', worldFolderFilter);
+                        setWorldFolderFilter('전체');
+                      }}
+                      className="rounded-lg p-1 text-stone-400 hover:bg-red-50 hover:text-red-600"
+                      title="선택한 분류 삭제 (설정은 미분류로 이동)"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
               </div>
               <button
                 type="button"
@@ -803,6 +832,19 @@ export default function LeftSidebar({
                 >
                   + 분류
                 </button>
+                {plotFolderFilter !== '전체' && plotFolderFilter !== '미분류' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onDeleteGroup('plot', plotFolderFilter);
+                      setPlotFolderFilter('전체');
+                    }}
+                    className="rounded-lg p-1 text-stone-400 hover:bg-red-50 hover:text-red-600"
+                    title="선택한 분류 삭제 (사건은 미분류로 이동)"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
               <button
                 type="button"

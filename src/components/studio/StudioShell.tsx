@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, BookOpen, Settings, X, PenTool, Users, Globe, GitBranch } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { buildAIHeaders } from '@/lib/ai/client-key';
+import { ensureEditorHtml, stripHtml } from '@/lib/text-utils';
 import LeftSidebar from './LeftSidebar';
 import ChapterEditor from './ChapterEditor';
 import RightAIPanel from './RightAIPanel';
@@ -93,6 +94,51 @@ export default function StudioShell({
     }));
   }
 
+  async function handleDeleteGroup(
+    kind: 'characters' | 'world' | 'plot',
+    groupName: string
+  ) {
+    if (!groupName || groupName === '미분류') return;
+    setExtraGroups((prev) => ({
+      ...prev,
+      [kind]: prev[kind].filter((g) => g !== groupName),
+    }));
+
+    const supabase = createClient();
+    const table =
+      kind === 'characters'
+        ? 'characters'
+        : kind === 'world'
+          ? 'world_settings'
+          : 'plot_nodes';
+
+    await supabase
+      .from(table)
+      .update({ folder: '미분류' })
+      .eq('project_id', project.id)
+      .eq('folder', groupName);
+
+    if (kind === 'characters') {
+      setCharacters((prev) =>
+        prev.map((c) =>
+          (c.folder || '미분류') === groupName ? { ...c, folder: '미분류' } : c
+        )
+      );
+    } else if (kind === 'world') {
+      setWorldSettings((prev) =>
+        prev.map((w) =>
+          (w.folder || '미분류') === groupName ? { ...w, folder: '미분류' } : w
+        )
+      );
+    } else {
+      setPlotNodes((prev) =>
+        prev.map((p) =>
+          (p.folder || '미분류') === groupName ? { ...p, folder: '미분류' } : p
+        )
+      );
+    }
+  }
+
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -130,7 +176,7 @@ export default function StudioShell({
 
   function handleChangeChapterContent(content: string) {
     if (!activeChapter) return;
-    const wordCount = content.length;
+    const wordCount = stripHtml(content).length;
     setChapters((prev) =>
       prev.map((c) =>
         c.id === activeChapter.id
@@ -370,7 +416,7 @@ export default function StudioShell({
       body: JSON.stringify({
         chapterId: activeChapter.id,
         title: activeChapter.title,
-        content: activeChapter.content,
+        content: stripHtml(activeChapter.content),
       }),
     });
     const data = await res.json();
@@ -386,7 +432,7 @@ export default function StudioShell({
   function handleExportMarkdown() {
     if (!activeChapter) return;
     const blob = new Blob(
-      [`# ${activeChapter.title}\n\n${activeChapter.content}`],
+      [`# ${activeChapter.title}\n\n${stripHtml(activeChapter.content)}`],
       { type: 'text/markdown;charset=utf-8' }
     );
     const url = URL.createObjectURL(blob);
@@ -399,8 +445,10 @@ export default function StudioShell({
 
   function handleInsertToEditor(text: string) {
     if (!activeChapter) return;
-    const separator = activeChapter.content.trim().length > 0 ? '\n\n' : '';
-    handleChangeChapterContent(`${activeChapter.content}${separator}${text}`);
+    const baseHtml = ensureEditorHtml(activeChapter.content);
+    const insertedHtml = ensureEditorHtml(text);
+    const nextHtml = baseHtml ? `${baseHtml}${insertedHtml}` : insertedHtml;
+    handleChangeChapterContent(nextHtml);
     setMobilePane('editor');
   }
 
@@ -572,6 +620,7 @@ export default function StudioShell({
             onDeletePlot={handleDeletePlot}
             extraGroups={extraGroups}
             onAddGroup={handleAddGroup}
+            onDeleteGroup={handleDeleteGroup}
             onNavigateBibleItem={(kind, id) => {
               setCenterMode(kind);
               setFocusedItem({ kind, id, nonce: Date.now() });
@@ -595,6 +644,7 @@ export default function StudioShell({
         >
           {centerMode === 'editor' ? (
             <ChapterEditor
+              projectId={project.id}
               chapter={activeChapter}
               savingState={savingState}
               onChangeTitle={handleChangeChapterTitle}
@@ -629,6 +679,7 @@ export default function StudioShell({
               onDeletePlot={handleDeletePlot}
               extraGroups={extraGroups}
               onAddGroup={handleAddGroup}
+              onDeleteGroup={handleDeleteGroup}
               focusedItem={focusedItem}
               onRequestImageGeneration={(targetType, targetId) => {
                 setImageTargetType(targetType);

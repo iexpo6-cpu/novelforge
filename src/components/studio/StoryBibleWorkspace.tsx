@@ -43,6 +43,7 @@ interface StoryBibleWorkspaceProps {
   plotNodes: PlotNode[];
   extraGroups: { characters: string[]; world: string[]; plot: string[] };
   onAddGroup: (kind: 'characters' | 'world' | 'plot', name: string) => void;
+  onDeleteGroup: (kind: 'characters' | 'world' | 'plot', name: string) => Promise<void>;
   focusedItem?: {
     kind: BibleWorkspaceMode;
     id: string;
@@ -403,6 +404,7 @@ export default function StoryBibleWorkspace({
   plotNodes,
   extraGroups,
   onAddGroup,
+  onDeleteGroup,
   focusedItem,
   onSaveProjectMeta,
   onSaveCharacter,
@@ -421,6 +423,9 @@ export default function StoryBibleWorkspace({
   // Filter dropdown states
   const [charGroupFilter, setCharGroupFilter] = useState<string>('전체');
   const [charTagFilter, setCharTagFilter] = useState<string>('전체');
+  const [charSortBy, setCharSortBy] = useState<
+    'group' | 'name' | 'role' | 'recent'
+  >('group');
   const [charViewMode, setCharViewMode] = useState<'edit' | 'graph'>('edit');
   const [charWriteMode, setCharWriteMode] = useState<
     'structured' | 'free' | 'both'
@@ -702,14 +707,22 @@ export default function StoryBibleWorkspace({
   );
 
   const charGroups = extractGroups(characters, extraGroups.characters);
-  const filteredCharacters = characters.filter((c) => {
-    const matchGroup =
-      charGroupFilter === '전체' ||
-      (c.folder || '미분류') === charGroupFilter;
-    const matchTag =
-      charTagFilter === '전체' || (c.tags ?? []).includes(charTagFilter);
-    return matchGroup && matchTag;
-  });
+  const filteredCharacters = characters
+    .filter((c) => {
+      const matchGroup =
+        charGroupFilter === '전체' ||
+        (c.folder || '미분류') === charGroupFilter;
+      const matchTag =
+        charTagFilter === '전체' || (c.tags ?? []).includes(charTagFilter);
+      return matchGroup && matchTag;
+    })
+    .sort((a, b) => {
+      if (charSortBy === 'name') return a.name.localeCompare(b.name, 'ko');
+      if (charSortBy === 'role') return a.role.localeCompare(b.role, 'ko');
+      if (charSortBy === 'recent')
+        return b.created_at.localeCompare(a.created_at);
+      return a.name.localeCompare(b.name, 'ko');
+    });
   const groupedCharacters = groupItemsByCategory(filteredCharacters);
 
   const worldGroups = extractGroups(worldSettings, extraGroups.world);
@@ -850,10 +863,41 @@ export default function StoryBibleWorkspace({
                 <Plus className="h-3.5 w-3.5" />
                 분류 추가
               </button>
+              {activeGroupFilter !== '전체' &&
+                activeGroupFilter !== '미분류' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await onDeleteGroup(mode, activeGroupFilter);
+                      setActiveGroupFilter('전체');
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                    title="선택한 분류 삭제 (항목은 미분류로 이동)"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    분류 삭제
+                  </button>
+                )}
             </div>
 
             {mode === 'characters' && (
-              <div className="flex items-center gap-1 rounded-lg bg-stone-100 p-0.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={charSortBy}
+                  onChange={(e) =>
+                    setCharSortBy(
+                      e.target.value as 'group' | 'name' | 'role' | 'recent'
+                    )
+                  }
+                  className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-700"
+                  title="인물 정렬 기준"
+                >
+                  <option value="group">정렬: 분류별 묶음</option>
+                  <option value="name">정렬: 이름순 (가나다)</option>
+                  <option value="role">정렬: 역할순</option>
+                  <option value="recent">정렬: 최신 등록순</option>
+                </select>
+                <div className="flex items-center gap-1 rounded-lg bg-stone-100 p-0.5">
                 <button
                   type="button"
                   onClick={() => setCharViewMode('edit')}
@@ -877,6 +921,7 @@ export default function StoryBibleWorkspace({
                   <Network className="h-3.5 w-3.5" />
                   인물 관계도 보기
                 </button>
+              </div>
               </div>
             )}
           </div>
@@ -994,16 +1039,70 @@ export default function StoryBibleWorkspace({
                 <Plus className="h-3.5 w-3.5" />새 등장인물 작성
               </button>
 
-              {groupedCharacters.map((group) => (
-                <div key={group.group} className="space-y-1.5">
-                  <div className="flex items-center gap-1.5 px-1 text-[11px] font-bold text-stone-500">
-                    <Tag className="h-3 w-3 text-amber-600" />
-                    <span>{group.group}</span>
-                    <span className="text-stone-400">
-                      ({group.items.length})
-                    </span>
+              {charSortBy === 'group' ? (
+                groupedCharacters.map((group) => (
+                  <div key={group.group} className="space-y-1.5">
+                    <div className="flex items-center gap-1.5 px-1 text-[11px] font-bold text-stone-500">
+                      <Tag className="h-3 w-3 text-amber-600" />
+                      <span>{group.group}</span>
+                      <span className="text-stone-400">
+                        ({group.items.length})
+                      </span>
+                    </div>
+                    {group.items.map((c) => (
+                      <div
+                        key={c.id}
+                        onClick={() =>
+                          setCharDraft({
+                            ...c,
+                            tags: c.tags ?? [],
+                            linked_relationships: c.linked_relationships ?? [],
+                            custom_fields: c.custom_fields ?? [],
+                          })
+                        }
+                        className={`flex cursor-pointer items-center gap-2.5 rounded-xl border p-2.5 transition ${
+                          charDraft.id === c.id
+                            ? 'border-amber-400 bg-amber-50/60'
+                            : 'border-stone-200 bg-white hover:border-stone-300'
+                        }`}
+                      >
+                        {c.avatar_image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={c.avatar_image_url}
+                            alt={c.name}
+                            className="h-10 w-10 shrink-0 rounded-lg object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-xs font-bold text-stone-500">
+                            {c.name.slice(0, 2)}
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-bold text-stone-900">
+                            {c.name}
+                          </p>
+                          <p className="text-[11px] text-stone-500">{c.role}</p>
+                          {(c.tags ?? []).length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {(c.tags ?? []).slice(0, 3).map((t) => (
+                                <span
+                                  key={t}
+                                  className="rounded bg-amber-50 px-1 text-[9px] font-medium text-amber-800"
+                                >
+                                  #{t}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  {group.items.map((c) => (
+                ))
+              ) : (
+                <div className="space-y-1.5">
+                  {filteredCharacters.map((c) => (
                     <div
                       key={c.id}
                       onClick={() =>
@@ -1036,24 +1135,14 @@ export default function StoryBibleWorkspace({
                         <p className="truncate text-xs font-bold text-stone-900">
                           {c.name}
                         </p>
-                        <p className="text-[11px] text-stone-500">{c.role}</p>
-                        {(c.tags ?? []).length > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {(c.tags ?? []).slice(0, 3).map((t) => (
-                              <span
-                                key={t}
-                                className="rounded bg-amber-50 px-1 text-[9px] font-medium text-amber-800"
-                              >
-                                #{t}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        <p className="text-[11px] text-stone-500">
+                          {c.role} · {c.folder || '미분류'}
+                        </p>
                       </div>
                     </div>
                   ))}
                 </div>
-              ))}
+              )}
             </div>
 
             {/* Character Detail Form */}

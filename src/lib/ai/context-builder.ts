@@ -1,3 +1,4 @@
+import { stripHtml } from '@/lib/text-utils';
 import type {
   AIActionType,
   Chapter,
@@ -132,8 +133,9 @@ export function buildNovelContext(input: NovelContextInput): string {
   }
 
   if (currentChapter) {
-    const body = currentChapter.content.trim()
-      ? truncateTail(currentChapter.content, maxChapterChars)
+    const plainBody = stripHtml(currentChapter.content);
+    const body = plainBody.trim()
+      ? truncateTail(plainBody, maxChapterChars)
       : '(아직 작성된 본문이 없습니다.)';
     sections.push(`## 현재 집필 중인 회차: ${currentChapter.title}\n${body}`);
   }
